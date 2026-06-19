@@ -2,7 +2,7 @@
 
 client_id = "c2e45ad18cb75c60ff489050150d9bc1"
 name = "StorePilot"
-application_url = "https://example.com"
+application_url = "https://store-pilot-eta.vercel.app"
 embedded = true
 
 [access_scopes]
@@ -45,7 +45,10 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [
+  "https://store-pilot-eta.vercel.app/auth/callback",
+  "https://store-pilot-eta.vercel.app/api/auth/callback"
+]
 
 [build]
 include_config_on_deploy = true
