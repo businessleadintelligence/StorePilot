@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
+import { validateWebhookRequest } from "../shopify.server";
 import db from "../db.server";
 import { deactivateStoreOnUninstall } from "../services/store.server";
 
@@ -23,22 +23,7 @@ function logSessionCleanup(
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  let shop: string;
-  let topic: string;
-
-  try {
-    ({ shop, topic } = await authenticate.webhook(request));
-  } catch (error) {
-    console.error("[uninstall-debug]", {
-      type: error?.constructor?.name,
-      status: error instanceof Response ? error.status : null,
-      statusText: error instanceof Response ? error.statusText : null,
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : null,
-    });
-
-    throw error;
-  }
+  const { shop, topic } = await validateWebhookRequest(request);
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
