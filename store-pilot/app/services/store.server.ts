@@ -61,6 +61,25 @@ function logStoreSync(
   }
 }
 
+function logStoreDeactivate(
+  level: "info" | "error",
+  message: string,
+  context: {
+    shop: string;
+    operation: string;
+    storeId?: string;
+    reason?: string;
+  },
+) {
+  const payload = { message, ...context };
+
+  if (level === "error") {
+    console.error("[store-deactivate]", payload);
+  } else {
+    console.info("[store-deactivate]", payload);
+  }
+}
+
 async function fetchShopMetadata(
   admin: StoreSyncAdminClient,
   shop: string,
@@ -183,6 +202,54 @@ export async function upsertStoreFromSession(
     logStoreSync("error", "Store upsert failed", {
       shop,
       operation: "upsert_store",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+  }
+}
+
+export async function deactivateStoreOnUninstall(shop: string): Promise<void> {
+  if (!shop) {
+    logStoreDeactivate("error", "Missing shop domain", {
+      shop: "unknown",
+      operation: "deactivate_store",
+      reason: "missing_shop",
+    });
+    return;
+  }
+
+  try {
+    const existing = await prisma.store.findUnique({
+      where: { shopifyDomain: shop },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      logStoreDeactivate("error", "Store row not found", {
+        shop,
+        operation: "deactivate_store",
+        reason: "store_not_found",
+      });
+      return;
+    }
+
+    await prisma.store.update({
+      where: { shopifyDomain: shop },
+      data: {
+        active: false,
+        accessToken: "",
+        ga4RefreshToken: null,
+      },
+    });
+
+    logStoreDeactivate("info", "Store deactivated", {
+      shop,
+      operation: "deactivate_store",
+      storeId: existing.id,
+    });
+  } catch (error) {
+    logStoreDeactivate("error", "Store deactivation failed", {
+      shop,
+      operation: "deactivate_store",
       reason: error instanceof Error ? error.message : "unknown_error",
     });
   }
