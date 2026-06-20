@@ -23,7 +23,22 @@ function logSessionCleanup(
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic } = await authenticate.webhook(request);
+  let shop: string;
+  let topic: string;
+
+  try {
+    ({ shop, topic } = await authenticate.webhook(request));
+  } catch (error) {
+    console.error("[uninstall-debug]", {
+      type: error?.constructor?.name,
+      status: error instanceof Response ? error.status : null,
+      statusText: error instanceof Response ? error.statusText : null,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : null,
+    });
+
+    throw error;
+  }
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
