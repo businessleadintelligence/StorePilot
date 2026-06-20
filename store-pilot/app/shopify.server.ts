@@ -6,6 +6,8 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
+import { upsertStoreFromSession } from "./services/store.server";
+import { upsertOwnerFromSession } from "./services/user.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -18,6 +20,29 @@ const shopify = shopifyApp({
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
+  },
+  hooks: {
+    afterAuth: async ({ session, admin }) => {
+      try {
+        await upsertStoreFromSession(session, admin);
+      } catch (error) {
+        console.error("[store-sync]", {
+          shop: session.shop ?? "unknown",
+          operation: "after_auth",
+          reason: error instanceof Error ? error.message : "unknown_error",
+        });
+      }
+
+      try {
+        await upsertOwnerFromSession(session, admin);
+      } catch (error) {
+        console.error("[user-sync]", {
+          shop: session.shop ?? "unknown",
+          operation: "after_auth",
+          reason: error instanceof Error ? error.message : "unknown_error",
+        });
+      }
+    },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }

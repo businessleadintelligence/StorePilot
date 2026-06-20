@@ -8,6 +8,73 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum SubscriptionPlan {
+  starter
+  growth
+  agency
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  cancelled
+}
+
+enum UserRole {
+  owner
+  member
+}
+
+model Store {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyDomain        String             @unique @db.VarChar(255)
+  shopifyId            String             @unique @db.VarChar(100)
+  accessToken          String
+  storeName            String             @db.VarChar(255)
+  currency             String             @default("USD") @db.VarChar(10)
+  timezone             String             @default("UTC") @db.VarChar(100)
+  subscriptionPlan     SubscriptionPlan   @default(starter)
+  subscriptionStatus   SubscriptionStatus @default(trialing)
+  trialEndsAt          DateTime?          @db.Timestamptz
+  ga4PropertyId        String?            @db.VarChar(100)
+  ga4RefreshToken      String?
+  ga4ConnectedAt       DateTime?          @db.Timestamptz
+  briefingTime         String             @default("08:00") @db.VarChar(5)
+  briefingTimezone     String             @default("UTC") @db.VarChar(100)
+  active               Boolean            @default(true)
+  historicalImportDone Boolean            @default(false)
+  lastOrdersSyncAt     DateTime?          @db.Timestamptz
+  lastInventorySyncAt  DateTime?          @db.Timestamptz
+  lastRefundsSyncAt    DateTime?          @db.Timestamptz
+  lastProductsSyncAt   DateTime?          @db.Timestamptz
+  lastGa4SyncAt        DateTime?          @db.Timestamptz
+  createdAt            DateTime           @default(now()) @db.Timestamptz
+  updatedAt            DateTime           @updatedAt @db.Timestamptz
+  users                User[]
+
+  @@index([active, subscriptionPlan])
+  @@index([briefingTime])
+  @@map("stores")
+}
+
+model User {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String    @db.Uuid
+  email       String    @db.VarChar(320)
+  name        String?   @db.VarChar(255)
+  role        UserRole  @default(owner)
+  lastLoginAt DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([email, storeId], map: "users_email_store_idx")
+  @@index([storeId], map: "users_store_id_idx")
+  @@map("users")
+}
+
 model Session {
   id                  String    @id
   shop                String
