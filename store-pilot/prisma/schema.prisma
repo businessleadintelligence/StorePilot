@@ -60,6 +60,7 @@ model Store {
   updatedAt            DateTime           @updatedAt @db.Timestamptz
   users                User[]
   products             Product[]
+  webhookEvents        WebhookEvent[]
 
   @@index([active, subscriptionPlan])
   @@index([briefingTime])
@@ -104,18 +105,19 @@ model Session {
 }
 
 model Product {
-  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  storeId           String        @db.Uuid
-  shopifyProductId  String        @db.VarChar(100)
-  shopifyVariantId  String        @db.VarChar(100)
-  title             String        @db.VarChar(500)
-  sku               String?       @db.VarChar(255)
-  status            ProductStatus @default(active)
-  price             Decimal?      @db.Decimal(12, 2)
-  inventoryQuantity Int?
-  inventoryTracked  Boolean       @default(true)
-  createdAt         DateTime      @default(now()) @db.Timestamptz
-  updatedAt         DateTime      @updatedAt @db.Timestamptz
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                String        @db.Uuid
+  shopifyProductId       String        @db.VarChar(100)
+  shopifyVariantId       String        @db.VarChar(100)
+  shopifyInventoryItemId String?       @db.VarChar(100)
+  title                  String        @db.VarChar(500)
+  sku                    String?       @db.VarChar(255)
+  status                 ProductStatus @default(active)
+  price                  Decimal?      @db.Decimal(12, 2)
+  inventoryQuantity      Int?
+  inventoryTracked       Boolean       @default(true)
+  createdAt              DateTime      @default(now()) @db.Timestamptz
+  updatedAt              DateTime      @updatedAt @db.Timestamptz
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
@@ -124,5 +126,22 @@ model Product {
   @@index([storeId, shopifyProductId], map: "products_store_product_idx")
   @@index([storeId, status], map: "products_status_idx")
   @@index([storeId, inventoryTracked], map: "products_inventory_tracked_idx")
+  @@index([storeId, shopifyInventoryItemId], map: "products_inventory_item_idx")
   @@map("products")
+}
+
+model WebhookEvent {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String   @db.Uuid
+  shopifyWebhookId      String   @unique(map: "webhook_events_shopify_webhook_id_unique") @db.VarChar(255)
+  shop                  String   @db.VarChar(255)
+  topic                 String   @db.VarChar(100)
+  processedSuccessfully Boolean  @default(true)
+  processedAt           DateTime @default(now()) @db.Timestamptz
+  createdAt             DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storeId], map: "webhook_events_store_id_idx")
+  @@map("webhook_events")
 }

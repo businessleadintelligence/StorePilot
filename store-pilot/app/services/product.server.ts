@@ -19,6 +19,7 @@ const PRODUCTS_QUERY = `#graphql
                 price
                 inventoryQuantity
                 inventoryItem {
+                  id
                   tracked
                 }
               }
@@ -95,6 +96,7 @@ interface ProductVariantNode {
   price?: string | null;
   inventoryQuantity?: number | null;
   inventoryItem?: {
+    id?: string | null;
     tracked?: boolean | null;
   } | null;
 }
@@ -127,6 +129,7 @@ interface ProductsQueryResponse {
 interface NormalizedVariantRow {
   shopifyProductId: string;
   shopifyVariantId: string;
+  shopifyInventoryItemId: string | null;
   title: string;
   sku: string | null;
   status: ProductStatus;
@@ -142,6 +145,7 @@ export interface ShopifyProductWebhookVariant {
   price?: string | null;
   inventory_quantity?: number | null;
   inventory_management?: string | null;
+  inventory_item_id?: number | string | null;
 }
 
 export interface ShopifyProductWebhookPayload {
@@ -284,6 +288,7 @@ export function normalizeVariantRow(
   return {
     shopifyProductId: product.id,
     shopifyVariantId: variant.id,
+    shopifyInventoryItemId: variant.inventoryItem?.id ?? null,
     title: product.title,
     sku: variant.sku?.trim() ? variant.sku : null,
     status: mapProductStatus(product.status),
@@ -314,6 +319,7 @@ export async function upsertVariantRow(
       storeId,
       shopifyProductId: row.shopifyProductId,
       shopifyVariantId: row.shopifyVariantId,
+      shopifyInventoryItemId: row.shopifyInventoryItemId,
       title: row.title,
       sku: row.sku,
       status: row.status,
@@ -329,6 +335,9 @@ export async function upsertVariantRow(
       price: row.price,
       inventoryQuantity: row.inventoryQuantity,
       inventoryTracked: row.inventoryTracked,
+      ...(row.shopifyInventoryItemId != null && {
+        shopifyInventoryItemId: row.shopifyInventoryItemId,
+      }),
     },
   });
 }
@@ -628,7 +637,7 @@ export function logProductWebhook(
 }
 
 function toShopifyGid(
-  resource: "Product" | "ProductVariant",
+  resource: "Product" | "ProductVariant" | "InventoryItem",
   id: string | number,
 ): string {
   const value = String(id);
@@ -688,10 +697,15 @@ export function normalizeWebhookVariantRow(
 
   const sku = variant.sku?.trim() ? variant.sku : null;
   const inventoryManagement = variant.inventory_management?.toLowerCase();
+  const shopifyInventoryItemId =
+    variant.inventory_item_id !== undefined && variant.inventory_item_id !== null
+      ? toShopifyGid("InventoryItem", variant.inventory_item_id)
+      : null;
 
   return {
     shopifyProductId,
     shopifyVariantId,
+    shopifyInventoryItemId,
     title: payload.title,
     sku,
     status: mapProductStatus(payload.status),
