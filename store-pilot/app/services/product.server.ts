@@ -11,7 +11,7 @@ const PRODUCTS_QUERY = `#graphql
           id
           title
           status
-          variants(first: 100) {
+          variants(first: 250) {
             edges {
               node {
                 id
@@ -26,6 +26,7 @@ const PRODUCTS_QUERY = `#graphql
             }
             pageInfo {
               hasNextPage
+              endCursor
             }
           }
         }
@@ -33,6 +34,34 @@ const PRODUCTS_QUERY = `#graphql
       pageInfo {
         hasNextPage
         endCursor
+      }
+    }
+  }
+`;
+
+const PRODUCT_VARIANTS_QUERY = `#graphql
+  query StorePilotGetProductVariants($productId: ID!, $variantCursor: String) {
+    product(id: $productId) {
+      id
+      title
+      status
+      variants(first: 250, after: $variantCursor) {
+        edges {
+          node {
+            id
+            sku
+            price
+            inventoryQuantity
+            inventoryItem {
+              id
+              tracked
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
       }
     }
   }
@@ -68,6 +97,8 @@ type ProductSyncLogContext = {
     | "bootstrap_scheduled"
     | "sync_started"
     | "product_page"
+    | "variant_page"
+    | "variant_pages_loaded"
     | "sync_completed"
     | "sync_summary"
     | "sync_failed"
@@ -80,6 +111,9 @@ type ProductSyncLogContext = {
   productsProcessed?: number;
   variantsProcessed?: number;
   productPage?: number;
+  productId?: string;
+  variantCount?: number;
+  variantPages?: number;
   durationMs?: number;
 };
 
@@ -101,15 +135,18 @@ interface ProductVariantNode {
   } | null;
 }
 
+interface VariantConnectionPageInfo {
+  hasNextPage?: boolean | null;
+  endCursor?: string | null;
+}
+
 interface ProductNode {
   id?: string | null;
   title?: string | null;
   status?: string | null;
   variants?: {
     edges?: Array<{ node?: ProductVariantNode | null }> | null;
-    pageInfo?: {
-      hasNextPage?: boolean | null;
-    } | null;
+    pageInfo?: VariantConnectionPageInfo | null;
   } | null;
 }
 
@@ -125,6 +162,18 @@ interface ProductsQueryResponse {
   };
   errors?: GraphQlError[];
 }
+
+interface ProductVariantsQueryResponse {
+  data?: {
+    product?: ProductNode | null;
+  };
+  errors?: GraphQlError[];
+}
+
+export type FetchAllVariantsResult = {
+  variants: ProductVariantNode[];
+  variantPages: number;
+};
 
 interface NormalizedVariantRow {
   shopifyProductId: string;
@@ -405,30 +454,131 @@ export async function fetchProductPage(
   );
   const body = (await response.json()) as ProductsQueryResponse;
 
-  if (body.errors?.length) {
-    const reason = body.errors
-      .map((error) => error.message ?? "unknown")
-      .join("; ");
+  handleProductSyncGraphqlErrors(body, shop, storeId);
 
-    logProductSync("error", "GraphQL returned errors", {
-      shop,
-      storeId,
-      operation: "graphql_error",
-      reason,
-    });
+  return body;
+}
 
-    const insufficientScope = body.errors.some(
-      (error) =>
-        error.extensions?.code === "ACCESS_DENIED" ||
-        reason.toLowerCase().includes("access denied"),
-    );
+function collectVariantNodes(
+  edges: Array<{ node?: ProductVariantNode | null }> | null | undefined,
+): ProductVariantNode[] {
+  const variants: ProductVariantNode[] = [];
 
+  for (const edge of edges ?? []) {
+    if (edge?.node) {
+      variants.push(edge.node);
+    }
+  }
+
+  return variants;
+}
+
+function handleProductSyncGraphqlErrors(
+  body: { errors?: GraphQlError[] },
+  shop: string,
+  storeId: string,
+): void {
+  if (!body.errors?.length) {
+    return;
+  }
+
+  const reason = body.errors
+    .map((error) => error.message ?? "unknown")
+    .join("; ");
+
+  logProductSync("error", "GraphQL returned errors", {
+    shop,
+    storeId,
+    operation: "graphql_error",
+    reason,
+  });
+
+  const insufficientScope = body.errors.some(
+    (error) =>
+      error.extensions?.code === "ACCESS_DENIED" ||
+      reason.toLowerCase().includes("access denied"),
+  );
+
+  throw new Error(insufficientScope ? "insufficient_scope" : "graphql_errors");
+}
+
+export async function fetchProductVariantPage(
+  admin: ProductSyncAdminClient,
+  shop: string,
+  storeId: string,
+  productId: string,
+  variantCursor: string | null,
+): Promise<ProductVariantsQueryResponse> {
+  if (process.env.PRODUCT_SYNC_SIMULATE_GRAPHQL_FAILURE === "1") {
     throw new Error(
-      insufficientScope ? "insufficient_scope" : "graphql_errors",
+      "Simulated GraphQL failure (PRODUCT_SYNC_SIMULATE_GRAPHQL_FAILURE)",
     );
   }
 
+  const response = await graphqlWithRetry(
+    admin,
+    PRODUCT_VARIANTS_QUERY,
+    { productId, variantCursor },
+    { shop, storeId },
+  );
+  const body = (await response.json()) as ProductVariantsQueryResponse;
+
+  handleProductSyncGraphqlErrors(body, shop, storeId);
+
   return body;
+}
+
+export async function fetchAllVariantsForProduct(
+  admin: ProductSyncAdminClient,
+  shop: string,
+  storeId: string,
+  product: ProductNode,
+): Promise<FetchAllVariantsResult> {
+  if (!product.id) {
+    throw new Error("missing_product_id");
+  }
+
+  const variants = collectVariantNodes(product.variants?.edges);
+  let variantPages = 1;
+  let hasNextPage = product.variants?.pageInfo?.hasNextPage === true;
+  let variantCursor = product.variants?.pageInfo?.endCursor ?? null;
+
+  while (hasNextPage) {
+    if (!variantCursor) {
+      throw new Error("missing_variant_page_cursor");
+    }
+
+    variantPages += 1;
+
+    const body = await fetchProductVariantPage(
+      admin,
+      shop,
+      storeId,
+      product.id,
+      variantCursor,
+    );
+    const productNode = body.data?.product;
+
+    if (!productNode?.id) {
+      throw new Error("product_not_found_in_graphql");
+    }
+
+    variants.push(...collectVariantNodes(productNode.variants?.edges));
+
+    hasNextPage = productNode.variants?.pageInfo?.hasNextPage === true;
+    variantCursor = productNode.variants?.pageInfo?.endCursor ?? null;
+
+    logProductSync("info", "Fetched variant page", {
+      shop,
+      storeId,
+      operation: "variant_page",
+      reason: product.id,
+      productPage: variantPages,
+      variantsProcessed: variants.length,
+    });
+  }
+
+  return { variants, variantPages };
 }
 
 async function assertStoreEligible(
@@ -520,9 +670,15 @@ export async function syncProductsFromShopify(
         }
 
         result.productsProcessed += 1;
-        const variantEdges = product.variants?.edges ?? [];
 
-        if (variantEdges.length === 0) {
+        const { variants, variantPages } = await fetchAllVariantsForProduct(
+          admin,
+          shop,
+          storeId,
+          product,
+        );
+
+        if (variants.length === 0) {
           logProductSync("warn", "Product has zero variants", {
             shop,
             storeId,
@@ -532,18 +688,18 @@ export async function syncProductsFromShopify(
           continue;
         }
 
-        if (product.variants?.pageInfo?.hasNextPage) {
-          logProductSync("warn", "Product has more than 100 variants", {
+        if (variantPages > 1) {
+          logProductSync("info", "Loaded paginated product variants", {
             shop,
             storeId,
-            operation: "product_page",
-            reason: "variant_page_truncated",
-            productsProcessed: result.productsProcessed,
+            operation: "variant_pages_loaded",
+            productId: product.id,
+            variantCount: variants.length,
+            variantPages,
           });
         }
 
-        for (const variantEdge of variantEdges) {
-          const variant = variantEdge.node;
+        for (const variant of variants) {
           if (!variant) {
             result.skipped += 1;
             continue;
