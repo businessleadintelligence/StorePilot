@@ -1,7 +1,13 @@
 import { Prisma, type ProductStatus } from "@prisma/client";
 
 import prisma from "../db.server";
+import {
+  claimWebhookEvent,
+  markWebhookEventProcessed,
+} from "./webhook.server";
 import type { StoreSyncAdminClient } from "./store.server";
+
+type ProductDbClient = Pick<typeof prisma, "product">;
 
 const PRODUCTS_QUERY = `#graphql
   query StorePilotGetProducts($productCursor: String) {
@@ -232,6 +238,7 @@ type ProductWebhookLogContext = {
     | "webhook_received"
     | "webhook_upsert"
     | "webhook_reconcile"
+    | "webhook_reconcile_skipped"
     | "webhook_archive"
     | "webhook_completed"
     | "webhook_summary"
@@ -241,6 +248,9 @@ type ProductWebhookLogContext = {
     | "zero_variants";
   reason?: string;
   shopifyProductId?: string;
+  productId?: string;
+  skippedVariants?: number;
+  payloadVariantCount?: number;
   upserted?: number;
   archived?: number;
   skipped?: number;
@@ -354,6 +364,7 @@ export async function upsertVariantRow(
   storeId: string,
   row: NormalizedVariantRow,
   source: UpsertVariantSource = "sync",
+  db: ProductDbClient = prisma,
 ): Promise<void> {
   if (process.env.PRODUCT_SYNC_SIMULATE_PRISMA_FAILURE === "1") {
     throw new Error(
@@ -361,7 +372,7 @@ export async function upsertVariantRow(
     );
   }
 
-  const existing = await prisma.product.findUnique({
+  const existing = await db.product.findUnique({
     where: {
       storeId_shopifyVariantId: {
         storeId,
@@ -395,7 +406,7 @@ export async function upsertVariantRow(
       updateData.inventoryQuantity = row.inventoryQuantity;
     }
 
-    await prisma.product.update({
+    await db.product.update({
       where: {
         storeId_shopifyVariantId: {
           storeId,
@@ -418,7 +429,7 @@ export async function upsertVariantRow(
     inventoryQuantity = inventoryTracked ? null : row.inventoryQuantity;
   }
 
-  await prisma.product.create({
+  await db.product.create({
     data: {
       storeId,
       shopifyProductId: row.shopifyProductId,
@@ -935,8 +946,9 @@ export async function resolveStoreForWebhook(
 export async function archiveProductByShopifyId(
   storeId: string,
   shopifyProductId: string,
+  db: ProductDbClient = prisma,
 ): Promise<number> {
-  const result = await prisma.product.updateMany({
+  const result = await db.product.updateMany({
     where: {
       storeId,
       shopifyProductId,
@@ -952,8 +964,9 @@ export async function reconcileRemovedVariants(
   storeId: string,
   shopifyProductId: string,
   activeVariantIds: string[],
+  db: ProductDbClient = prisma,
 ): Promise<number> {
-  const result = await prisma.product.updateMany({
+  const result = await db.product.updateMany({
     where: {
       storeId,
       shopifyProductId,
@@ -966,10 +979,92 @@ export async function reconcileRemovedVariants(
   return result.count;
 }
 
+async function applyProductWebhookWrites(
+  input: ProductWebhookInput,
+  storeId: string,
+  payload: ShopifyProductWebhookPayload,
+  shopifyProductId: string,
+  reconcile: boolean,
+  db: ProductDbClient,
+): Promise<Pick<ProductWebhookResult, "upserted" | "archived" | "skipped">> {
+  const variants = payload.variants ?? [];
+  const activeVariantIds: string[] = [];
+  let upserted = 0;
+  let skipped = 0;
+  let skippedVariants = 0;
+
+  for (const variant of variants) {
+    const row = normalizeWebhookVariantRow(payload, variant);
+    if (!row) {
+      skipped += 1;
+      skippedVariants += 1;
+      continue;
+    }
+
+    activeVariantIds.push(row.shopifyVariantId);
+    await upsertVariantRow(storeId, row, "webhook", db);
+    upserted += 1;
+  }
+
+  logProductWebhook("info", "Product webhook variants upserted", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_upsert",
+    shopifyProductId,
+    upserted,
+    skipped,
+  });
+
+  let archived = 0;
+
+  if (reconcile) {
+    if (skippedVariants > 0) {
+      logProductWebhook("warn", "Product webhook reconcile skipped", {
+        shop: input.shop,
+        storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "webhook_reconcile_skipped",
+        productId: shopifyProductId,
+        skippedVariants,
+        payloadVariantCount: variants.length,
+      });
+    } else {
+      archived = await reconcileRemovedVariants(
+        storeId,
+        shopifyProductId,
+        activeVariantIds,
+        db,
+      );
+
+      if (archived > 0) {
+        logProductWebhook("info", "Removed product variants archived", {
+          shop: input.shop,
+          storeId,
+          topic: input.topic,
+          webhookId: input.webhookId,
+          operation: "webhook_reconcile",
+          shopifyProductId,
+          archived,
+        });
+      }
+    }
+  }
+
+  if (mapProductStatus(payload.status) === "archived") {
+    archived += await archiveProductByShopifyId(storeId, shopifyProductId, db);
+  }
+
+  return { upserted, archived, skipped };
+}
+
 async function upsertProductFromWebhookPayload(
   input: ProductWebhookInput,
   storeId: string,
   reconcile: boolean,
+  transactional = false,
 ): Promise<ProductWebhookResult> {
   const startedAt = Date.now();
   const result: ProductWebhookResult = {
@@ -1026,54 +1121,29 @@ async function upsertProductFromWebhookPayload(
     return result;
   }
 
-  const activeVariantIds: string[] = [];
-
-  for (const variant of variants) {
-    const row = normalizeWebhookVariantRow(payload, variant);
-    if (!row) {
-      result.skipped += 1;
-      continue;
-    }
-
-    activeVariantIds.push(row.shopifyVariantId);
-    await upsertVariantRow(storeId, row, "webhook");
-    result.upserted += 1;
-  }
-
-  logProductWebhook("info", "Product webhook variants upserted", {
-    shop: input.shop,
-    storeId,
-    topic: input.topic,
-    webhookId: input.webhookId,
-    operation: "webhook_upsert",
-    shopifyProductId,
-    upserted: result.upserted,
-    skipped: result.skipped,
-  });
-
-  if (reconcile) {
-    result.archived = await reconcileRemovedVariants(
-      storeId,
-      shopifyProductId,
-      activeVariantIds,
-    );
-
-    if (result.archived > 0) {
-      logProductWebhook("info", "Removed product variants archived", {
-        shop: input.shop,
+  const writes = transactional
+    ? await prisma.$transaction(async (tx) =>
+        applyProductWebhookWrites(
+          input,
+          storeId,
+          payload,
+          shopifyProductId,
+          reconcile,
+          tx,
+        ),
+      )
+    : await applyProductWebhookWrites(
+        input,
         storeId,
-        topic: input.topic,
-        webhookId: input.webhookId,
-        operation: "webhook_reconcile",
+        payload,
         shopifyProductId,
-        archived: result.archived,
-      });
-    }
-  }
+        reconcile,
+        prisma,
+      );
 
-  if (mapProductStatus(payload.status) === "archived") {
-    result.archived += await archiveProductByShopifyId(storeId, shopifyProductId);
-  }
+  result.upserted = writes.upserted;
+  result.archived = writes.archived;
+  result.skipped = writes.skipped;
 
   result.success = true;
   const durationMs = Date.now() - startedAt;
@@ -1107,6 +1177,31 @@ async function upsertProductFromWebhookPayload(
   return result;
 }
 
+async function claimProductWebhook(
+  input: ProductWebhookInput,
+  storeId: string,
+): Promise<{ duplicate: true } | { duplicate: false; eventId?: string }> {
+  const claim = await claimWebhookEvent({
+    storeId,
+    shop: input.shop,
+    topic: input.topic,
+    webhookId: input.webhookId,
+  });
+
+  if (claim.duplicate) {
+    logProductWebhook("info", "Duplicate product webhook skipped", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "duplicate_webhook",
+    });
+  }
+
+  return claim;
+}
+
 export async function handleProductCreateWebhook(
   input: ProductWebhookInput,
 ): Promise<ProductWebhookResult> {
@@ -1127,8 +1222,28 @@ export async function handleProductCreateWebhook(
     };
   }
 
+  const claim = await claimProductWebhook(input, store.storeId);
+  if (claim.duplicate) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
   try {
-    return await upsertProductFromWebhookPayload(input, store.storeId, false);
+    const result = await upsertProductFromWebhookPayload(
+      input,
+      store.storeId,
+      false,
+    );
+
+    if (claim.eventId) {
+      await markWebhookEventProcessed(claim.eventId);
+    }
+
+    return result;
   } catch (error) {
     logProductWebhook("error", "Product create webhook failed", {
       shop: input.shop,
@@ -1162,8 +1277,29 @@ export async function handleProductUpdateWebhook(
     };
   }
 
+  const claim = await claimProductWebhook(input, store.storeId);
+  if (claim.duplicate) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
   try {
-    return await upsertProductFromWebhookPayload(input, store.storeId, true);
+    const result = await upsertProductFromWebhookPayload(
+      input,
+      store.storeId,
+      true,
+      true,
+    );
+
+    if (claim.eventId) {
+      await markWebhookEventProcessed(claim.eventId);
+    }
+
+    return result;
   } catch (error) {
     logProductWebhook("error", "Product update webhook failed", {
       shop: input.shop,
@@ -1199,6 +1335,16 @@ export async function handleProductDeleteWebhook(
     };
   }
 
+  const claim = await claimProductWebhook(input, store.storeId);
+  if (claim.duplicate) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
   const payload = parseProductWebhookPayload(input.payload);
   const shopifyProductId = payload ? resolveShopifyProductId(payload) : null;
 
@@ -1211,6 +1357,11 @@ export async function handleProductDeleteWebhook(
       operation: "webhook_skipped",
       reason: "missing_product_id",
     });
+
+    if (claim.eventId) {
+      await markWebhookEventProcessed(claim.eventId);
+    }
+
     return {
       success: true,
       upserted: 0,
@@ -1224,6 +1375,10 @@ export async function handleProductDeleteWebhook(
       store.storeId,
       shopifyProductId,
     );
+
+    if (claim.eventId) {
+      await markWebhookEventProcessed(claim.eventId);
+    }
 
     logProductWebhook("info", "Product variants archived from delete webhook", {
       shop: input.shop,

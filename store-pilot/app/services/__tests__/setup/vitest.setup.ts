@@ -340,6 +340,10 @@ const prismaMock = vi.hoisted(() => ({
       },
     ),
   },
+  $transaction: vi.fn(
+    async (callback: (tx: typeof prismaMock) => Promise<unknown>) =>
+      callback(prismaMock),
+  ),
 }));
 
 vi.mock("../../../db.server", () => ({
