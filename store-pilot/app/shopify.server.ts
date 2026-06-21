@@ -15,6 +15,7 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import prisma from "./db.server";
 import { upsertStoreFromSession } from "./services/store.server";
 import { upsertOwnerFromSession } from "./services/user.server";
+import { scheduleBootstrapProductSync } from "./services/product.server";
 
 const shopifyAppConfig = {
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -53,6 +54,13 @@ const shopifyAppConfig = {
           shop: session.shop ?? "unknown",
           operation: "after_auth",
           reason: error instanceof Error ? error.message : "unknown_error",
+        });
+      }
+
+      if (session.shop) {
+        scheduleBootstrapProductSync({
+          shop: session.shop,
+          admin,
         });
       }
     },

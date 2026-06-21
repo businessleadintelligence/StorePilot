@@ -1,0 +1,785 @@
+STOREPILOT
+Metrics & Scoring Specification
+Version 1.0  ·  Deterministic Calculations  ·  AI Explains, Never Calculates  ·  Confidential
+Document
+StorePilot Metrics & Scoring Specification v1.0
+Calculation Method
+Deterministic. All formulas defined explicitly.
+AI Role
+Explanation only. AI never computes any metric.
+Metrics Defined
+Store Health Score · Revenue Health · Conversion Health · Inventory Health · Refund Health · Traffic Health · Revenue At Risk · Revenue Opportunity · Confidence Score · Priority Score
+Data Sources
+Shopify (required) · Google Analytics 4 (optional)
+Source Truth
+StorePilot Founder Specification v1.0
+Status
+DRAFT – For Engineering & Product Review
+SECTION 1  ·  Calculation Principles & Data Architecture
+1. Calculation Principles & Data Architecture
+1.1  Core Principle: Deterministic Calculations
+Every metric defined in this specification is computed by deterministic business logic — explicit formulas using real data values. The AI layer receives pre-computed outputs and is responsible exclusively for explaining results in plain English. No metric is calculated by, estimated by, or inferred by the AI model.
+CRITICAL RULE
+If a metric can be calculated deterministically from available data, it must be. AI is only invoked after all calculations are complete and their outputs are assembled into a context block. Sending raw data to the AI and asking it to calculate trends or percentages is a product defect.
+1.2  Calculation Timing
+Metric Group
+Calculation Frequency
+Trigger
+Storage
+Revenue Health
+Hourly
+Post revenue sync
+store_metrics_daily
+Conversion Health
+Hourly
+Post revenue sync
+store_metrics_daily
+Inventory Health
+Hourly
+Post inventory sync
+inventory_daily
+Refund Health
+Hourly
+Post refund sync
+store_metrics_daily
+Traffic Health
+Every 6 hours
+Post GA4 sync
+traffic_daily
+Store Health Score
+Hourly
+After all component scores
+store_metrics_daily
+Revenue At Risk
+Hourly
+After anomaly detection
+anomalies
+Revenue Opportunity
+Daily
+Nightly batch job
+recommendations
+Confidence Score
+Per event
+Per anomaly/recommendation
+anomalies / recommendations
+Priority Score
+Per recommendation
+On recommendation creation
+recommendations
+1.3  Baseline Comparison Strategy
+All health metrics compare current performance against a rolling baseline rather than a single prior-period snapshot. This prevents distortion from single-day anomalies in the comparison period.
+Window
+Days
+Used For
+Min Data Required
+Short-term
+7-day rolling average
+Anomaly detection triggers
+3 days
+Medium-term baseline
+28-day rolling average
+Health score calculation
+14 days
+Prior period (WoW)
+Same 7 days, prior week
+Revenue trend comparison
+7 days
+Prior period (MoM)
+Same 30 days, prior month
+Monthly executive review
+30 days
+1.4  Data Freshness Requirements
+Revenue, inventory, and refund data must be no older than 90 minutes when health scores are calculated.
+GA4 traffic data must be no older than 8 hours when Traffic Health is calculated.
+If data freshness requirements are not met, the affected component score uses the last valid calculation and is flagged as stale. Stale scores are excluded from anomaly detection but still contribute to the Store Health Score.
+Staleness is indicated in the dashboard with a data freshness timestamp per metric.
+SECTION 2  ·  Revenue Health Score
+2. Revenue Health Score
+30%
+Revenue Health
+Weight in Store Health Score — highest weighted component
+2.1  Definition
+Revenue Health measures how current revenue performance compares to the store's established baseline. It is not an absolute revenue figure — it is a relative performance score from 0 to 100 reflecting trend direction and magnitude.
+2.2  Required Data
+Daily revenue totals from Shopify Orders API (sum of total_price for orders with financial_status = paid)
+Minimum 14 days of historical daily revenue data to compute the 28-day baseline
+Order count per day (for conversion rate calculation used in Conversion Health)
+2.3  Formulas
+7-Day Rolling Average Revenue
+revenue_7d_avg = SUM(daily_revenue, last 7 days) / 7
+28-Day Rolling Average Revenue (Baseline)
+revenue_28d_avg = SUM(daily_revenue, last 28 days) / 28
+Revenue Change vs Baseline (%)
+revenue_change_pct = ((revenue_7d_avg - revenue_28d_avg) / revenue_28d_avg) × 100
+Revenue Health Score Mapping
+IF revenue_change_pct >= +10%  THEN revenue_health_score = 90 to 100
+IF revenue_change_pct >= 0%    THEN revenue_health_score = 75 to 89
+IF revenue_change_pct >= -15%  THEN revenue_health_score = 50 to 74
+IF revenue_change_pct >= -30%  THEN revenue_health_score = 25 to 49
+IF revenue_change_pct <  -30%  THEN revenue_health_score = 0 to 24
+2.4  Score Mapping Detail
+revenue_change_pct
+Score Range
+Score Calculation
+Label
+>= +10%
+90–100
+90 + MIN((change_pct - 10) × 1, 10)
+Excellent
+0% to +9.99%
+75–89
+75 + (change_pct / 10) × 14
+Good
+-14.99% to 0%
+50–74
+75 + (change_pct / 15) × 25
+Warning
+-29.99% to -15%
+25–49
+50 + ((change_pct + 30) / 15) × 25
+At Risk
+< -30%
+0–24
+MAX(0, 25 + ((change_pct + 30) / 10) × 25)
+Critical
+2.5  Anomaly Trigger
+TRIGGER
+Revenue anomaly fires when revenue_change_pct <= -15% (7-day average vs 28-day baseline). This is the 15% or greater decline threshold defined in the Founder Specification.
+2.6  Edge Cases
+New stores with fewer than 7 days of data: use available days only. Minimum 3 days required. If fewer than 3 days, Revenue Health score defaults to 50 (neutral) and is flagged as insufficient data.
+Zero revenue days: include in average. A day with $0 revenue is a valid data point.
+Revenue spike days (> 3× 28-day average): include in calculation. Do not exclude outliers from baseline.
+Store with no historical data at all: Revenue Health = null. Excluded from Store Health Score. Dashboard shows 'Calculating...'
+SECTION 3  ·  Conversion Health Score
+3. Conversion Health Score
+25%
+Conversion Health
+Weight in Store Health Score — second highest weighted component
+3.1  Definition
+Conversion Health measures how the store's conversion rate (orders per session) is trending relative to its own baseline. It reflects whether the store is converting its existing traffic efficiently. A declining conversion rate at constant traffic signals a product, pricing, or checkout problem.
+3.2  Required Data
+Daily order count from Shopify (count of orders with financial_status = paid)
+Daily session count from GA4 (sessions metric)
+IF GA4 is not connected: conversion health uses orders-per-day trend instead of orders-per-session. See Section 13 for GA4 dependency rules.
+3.3  Formulas (GA4 Connected)
+Daily Conversion Rate
+daily_conversion_rate = daily_orders / daily_sessions × 100  [expressed as percentage]
+7-Day Rolling Average Conversion Rate
+conv_rate_7d_avg = AVG(daily_conversion_rate, last 7 days)
+28-Day Rolling Average (Baseline)
+conv_rate_28d_avg = AVG(daily_conversion_rate, last 28 days)
+Conversion Rate Change vs Baseline (%)
+conv_rate_change_pct = ((conv_rate_7d_avg - conv_rate_28d_avg) / conv_rate_28d_avg) × 100
+3.4  Formulas (GA4 Not Connected — Fallback)
+Order Volume Index (no-session fallback)
+daily_order_rate = daily_orders / 30d_avg_daily_orders × 100
+Estimated Conversion Proxy Change (%)
+conv_rate_change_pct = ((order_rate_7d_avg - 100) / 100) × 100
+NOTE
+The GA4 fallback produces a less precise conversion health signal. Merchants without GA4 are shown a message: 'Connect Google Analytics 4 for more precise conversion tracking.'
+3.5  Score Mapping
+conv_rate_change_pct
+Score Range
+Score Calculation
+Label
+>= +10%
+90–100
+90 + MIN((change_pct - 10) × 1, 10)
+Excellent
+0% to +9.99%
+75–89
+75 + (change_pct / 10) × 14
+Good
+-9.99% to 0%
+50–74
+75 + (change_pct / 10) × 25
+Warning
+-24.99% to -10%
+25–49
+50 + ((change_pct + 25) / 15) × 25
+At Risk
+< -25%
+0–24
+MAX(0, 25 + ((change_pct + 25) / 10) × 25)
+Critical
+3.6  Anomaly Trigger
+TRIGGER
+Conversion anomaly fires when conv_rate_change_pct <= -10%. This is the 10% or greater decline threshold defined in the Founder Specification.
+3.7  Edge Cases
+Zero sessions with non-zero orders: mathematically invalid conversion rate. Use prior day's rate. Log a data quality warning.
+GA4 reports partial sessions (sync lag): mark conversion health as stale. Use last valid calculation.
+New store, fewer than 14 days of data: use available days for baseline. Minimum 3 days required.
+Session count spikes (e.g. viral traffic, bot traffic): included in calculation. No outlier exclusion in V1.
+SECTION 4  ·  Inventory Health Score
+4. Inventory Health Score
+20%
+Inventory Health
+Weight in Store Health Score — third highest weighted component
+4.1  Definition
+Inventory Health measures whether the store's product inventory is at healthy levels relative to recent sales velocity. It identifies both stockout risk (inventory running out) and overstock conditions (excess capital tied up). The primary risk signal is days of inventory remaining.
+4.2  Required Data
+Current inventory quantity per variant from Shopify Inventory API
+Daily units sold per variant (last 28 days) from Shopify Orders API
+Products must be filtered to tracked inventory items only (inventory_management = shopify)
+4.3  Formulas
+Average Daily Sales Velocity (per variant)
+daily_units_sold_avg = SUM(units_sold, last 14 days) / 14  [per variant]
+Days of Inventory Remaining (per variant)
+days_inventory_remaining = current_quantity / daily_units_sold_avg  [per variant]
+Per-Variant Inventory Score
+variant_inventory_score:
+  IF days_remaining <= 0   THEN 0      [out of stock]
+  IF days_remaining <= 7   THEN 10–25  [critical]
+  IF days_remaining <= 14  THEN 25–49  [at risk]
+  IF days_remaining <= 30  THEN 50–74  [low]
+  IF days_remaining <= 60  THEN 75–89  [good]
+  IF days_remaining > 60   THEN 90–100 [excellent]
+Store Inventory Health Score (Revenue-Weighted Average)
+inventory_health_score = WEIGHTED_AVG(variant_inventory_scores, weight = variant_revenue_contribution_28d)
+
+variant_revenue_contribution_28d = variant_revenue_28d / total_store_revenue_28d
+KEY DESIGN
+Inventory Health is a revenue-weighted average across all tracked variants — not a simple average. A stockout of a product contributing 40% of revenue is weighted 40× more than a stockout of a 1% revenue product. This ensures high-impact inventory risks drive the score.
+4.4  Anomaly Trigger
+TRIGGER
+Inventory risk anomaly fires when any tracked variant has days_inventory_remaining <= 14 AND that variant's revenue contribution >= 5% of 28-day store revenue. Low-revenue variants trigger a warning, not an anomaly.
+4.5  Edge Cases
+Variant with zero sales in 14 days: daily_units_sold_avg = 0. Use the prior 28-day period instead. If still zero: variant is excluded from inventory health calculation (assumed not actively selling).
+Variant with zero current stock and zero recent sales: score = 75 (neutral — likely discontinued or seasonal). Not flagged as a risk.
+New store with fewer than 14 days of sales data: use available sales data. Minimum 3 days required for velocity calculation.
+Unlimited inventory items (Shopify inventory_management = null): excluded from inventory health calculation.
+Bundles and variants with shared inventory pools: each variant counted independently. Shared inventory pool limitations are a V2 concern.
+SECTION 5  ·  Refund Health Score
+5. Refund Health Score
+15%
+Refund Health
+Weight in Store Health Score — fourth weighted component
+5.1  Definition
+Refund Health measures whether the store's refund rate is stable or spiking relative to its baseline. A refund spike signals product quality issues, misleading product descriptions, fulfilment problems, or fraud. Refund Health is an inverse score — higher refunds produce lower scores.
+5.2  Required Data
+Daily refund amounts from Shopify Refunds API (total refunded per day)
+Daily revenue totals (same source as Revenue Health)
+Daily refund count (number of refund transactions)
+5.3  Formulas
+Daily Refund Rate (%)
+daily_refund_rate = daily_refund_amount / daily_revenue × 100  [expressed as percentage]
+7-Day Rolling Average Refund Rate
+refund_rate_7d_avg = AVG(daily_refund_rate, last 7 days)
+28-Day Rolling Average Refund Rate (Baseline)
+refund_rate_28d_avg = AVG(daily_refund_rate, last 28 days)
+Refund Rate Change vs Baseline (%)
+refund_rate_change_pct = ((refund_rate_7d_avg - refund_rate_28d_avg) / refund_rate_28d_avg) × 100
+Refund Health Score Mapping
+IF refund_rate_change_pct <= -10%  THEN refund_health_score = 90–100  [refunds improving]
+IF refund_rate_change_pct <= +10%  THEN refund_health_score = 75–89   [stable]
+IF refund_rate_change_pct <= +30%  THEN refund_health_score = 50–74   [warning]
+IF refund_rate_change_pct <= +50%  THEN refund_health_score = 25–49   [at risk]
+IF refund_rate_change_pct >  +50%  THEN refund_health_score = 0–24    [critical spike]
+5.4  Anomaly Trigger
+TRIGGER
+Refund spike anomaly fires when refund_rate_change_pct >= +50%. This is the 50% or greater increase threshold defined in the Founder Specification. Note: this is a 50% increase in the refund RATE, not a 50% absolute refund rate.
+5.5  Absolute Refund Rate Floor
+Additionally, even without a percentage spike, a refund health warning is generated if the absolute refund_rate_7d_avg exceeds 10% (i.e. more than $1 in $10 of revenue is being refunded). This catches stores with chronically high refund rates where the baseline itself is already high.
+Absolute Refund Rate Alert
+absolute_refund_alert = IF refund_rate_7d_avg > 10% THEN generate_warning
+5.6  Edge Cases
+Day with zero revenue but non-zero refunds: refund rate for that day = 100%. This is a valid data point. Do not exclude.
+New store with no refund history: refund_rate_28d_avg = 0. Any refund in the first 28 days cannot generate a percentage-change anomaly. Use absolute rate threshold only.
+Mass refund event (e.g. product recall, batch error): refund spike anomaly fires normally. The AI explains the spike — it does not classify the cause.
+SECTION 6  ·  Traffic Health Score
+6. Traffic Health Score
+10%
+Traffic Health
+Weight in Store Health Score — requires GA4. Lowest weighted component.
+6.1  Definition
+Traffic Health measures whether the store is receiving consistent levels of visitor traffic relative to its baseline. A traffic drop without a corresponding revenue drop may indicate a GA4 tracking issue. A traffic drop with a revenue drop amplifies the revenue risk signal.
+6.2  GA4 Dependency
+GA4 REQUIRED
+Traffic Health cannot be calculated without Google Analytics 4 connected. If GA4 is not connected, Traffic Health score = null and its 10% weight is redistributed proportionally across the other four components. See Section 13 for full GA4 dependency rules.
+6.3  Required Data (GA4)
+Daily sessions from GA4 (sessions metric, all traffic)
+Daily users from GA4 (totalUsers metric)
+Channel groupings from GA4 (optional, for anomaly cause analysis context)
+6.4  Formulas
+7-Day Rolling Average Sessions
+sessions_7d_avg = AVG(daily_sessions, last 7 days)
+28-Day Rolling Average Sessions (Baseline)
+sessions_28d_avg = AVG(daily_sessions, last 28 days)
+Session Change vs Baseline (%)
+sessions_change_pct = ((sessions_7d_avg - sessions_28d_avg) / sessions_28d_avg) × 100
+Traffic Health Score Mapping
+IF sessions_change_pct >= +10%  THEN traffic_health_score = 90–100
+IF sessions_change_pct >= 0%    THEN traffic_health_score = 75–89
+IF sessions_change_pct >= -20%  THEN traffic_health_score = 50–74
+IF sessions_change_pct >= -40%  THEN traffic_health_score = 25–49
+IF sessions_change_pct <  -40%  THEN traffic_health_score = 0–24
+6.5  Anomaly Trigger
+TRIGGER
+Traffic drop anomaly fires when sessions_change_pct <= -20%. This is the 20% or greater decline threshold defined in the Founder Specification. Requires GA4.
+6.6  Edge Cases
+GA4 sync delay (data not yet available): use last valid session count. Mark traffic health as stale.
+GA4 tracking outage (zero sessions reported): do not include zero-session days if the gap is more than 1 day. Flag as data gap. Use prior period for health calculation.
+Seasonal traffic patterns: not adjusted for seasonality in V1. Rolling 28-day average naturally smooths moderate seasonality.
+SECTION 7  ·  Store Health Score
+7. Store Health Score
+7.1  Definition
+The Store Health Score is a single composite metric from 0 to 100 representing the overall operational health of the store. It is the weighted average of the five component health scores. It is the primary metric displayed in the AI COO Status Card and used in the Daily COO Briefing.
+7.2  Formula (All Components Available)
+Store Health Score (Standard Formula)
+store_health_score =
+  (revenue_health_score   × 0.30) +
+  (conversion_health_score × 0.25) +
+  (inventory_health_score  × 0.20) +
+  (refund_health_score     × 0.15) +
+  (traffic_health_score    × 0.10)
+
+ROUND to nearest integer. Range: 0–100.
+7.3  Formula (GA4 Not Connected — Traffic Excluded)
+When Traffic Health is unavailable, its 10% weight is redistributed proportionally to the other four components:
+Store Health Score (GA4 Absent — Weight Redistribution)
+redistribution_factor = 1 / (1 - 0.10) = 1.1111
+
+store_health_score =
+  (revenue_health_score    × 0.30 × 1.1111) +
+  (conversion_health_score × 0.25 × 1.1111) +
+  (inventory_health_score  × 0.20 × 1.1111) +
+  (refund_health_score     × 0.15 × 1.1111)
+
+Effective weights: Revenue 33.3% · Conversion 27.8% · Inventory 22.2% · Refund 16.7%
+7.4  Score Labels & Colour Coding
+Score Range
+Label
+Dashboard Colour
+Default Interpretation
+90–100
+Excellent
+Green
+All systems performing above baseline
+75–89
+Good
+Blue
+Minor issues. No urgent action required.
+50–74
+Needs Attention
+Yellow / Amber
+One or more components below baseline. Review recommended.
+25–49
+At Risk
+Orange / Red
+Active operational problems. Immediate review required.
+0–24
+Critical
+Dark Red
+Severe multi-component failures. Immediate action required.
+7.5  Edge Cases
+If any single component score is unavailable due to insufficient data (not null due to GA4 absence, but null due to data shortage): exclude that component and redistribute its weight proportionally using the same redistribution formula as the GA4 absence case.
+If fewer than 2 component scores are available: Store Health Score = null. Dashboard shows 'Calculating...' with an explanation of what data is needed.
+Store Health Score is always rounded to the nearest integer. No decimal scores are displayed.
+The Store Health Score must never be displayed without the component score breakdown visible to the merchant.
+SECTION 8  ·  Revenue At Risk
+8. Revenue At Risk
+8.1  Definition
+Revenue At Risk is the estimated monthly revenue currently being lost due to active operational issues. It is expressed in monetary terms (e.g. $4,200/month at risk) and represents the difference between the store's current trajectory and its baseline performance. Revenue At Risk is an aggregate figure summing the impact estimates of all active anomalies.
+DESIGN RULE
+Revenue At Risk is calculated by deterministic formulas and presented to the AI as a pre-computed figure. The AI explains why Revenue At Risk exists and what to do about it. The AI does not estimate or calculate Revenue At Risk.
+8.2  Per-Anomaly Revenue Impact Calculation
+8.2.1  Revenue Drop Impact
+Revenue Drop → Monthly Revenue At Risk
+baseline_monthly_revenue = revenue_28d_avg × 30.44
+current_monthly_revenue_projection = revenue_7d_avg × 30.44
+revenue_drop_impact = baseline_monthly_revenue - current_monthly_revenue_projection
+
+Include in Revenue At Risk IF: revenue_drop_impact > 0
+8.2.2  Conversion Drop Impact
+Conversion Drop → Monthly Revenue At Risk
+IF GA4 connected:
+  lost_orders_per_day = sessions_7d_avg × (conv_rate_28d_avg - conv_rate_7d_avg) / 100
+  avg_order_value = revenue_7d_avg / orders_7d_avg
+  conversion_drop_impact = lost_orders_per_day × avg_order_value × 30.44
+
+IF GA4 not connected:
+  Use revenue_drop_impact formula (Section 8.2.1) only. Do not estimate conversion impact separately.
+8.2.3  Inventory Risk Impact
+Inventory Risk → Monthly Revenue At Risk
+FOR EACH at-risk variant:
+  stockout_days = MAX(0, 30 - days_inventory_remaining)
+  variant_daily_revenue = daily_units_sold_avg × variant_price
+  inventory_impact_per_variant = stockout_days × variant_daily_revenue
+
+inventory_risk_impact = SUM(inventory_impact_per_variant FOR all at-risk variants)
+
+At-risk threshold: days_inventory_remaining <= 14 AND revenue_contribution >= 5%
+8.2.4  Refund Spike Impact
+Refund Spike → Monthly Revenue At Risk (excess refunds above baseline)
+excess_refund_rate = refund_rate_7d_avg - refund_rate_28d_avg  [percentage points]
+refund_spike_impact = (excess_refund_rate / 100) × baseline_monthly_revenue
+
+Include IF: refund_rate_change_pct >= 50%
+8.3  Total Revenue At Risk
+Total Revenue At Risk (with de-duplication)
+total_revenue_at_risk = SUM(
+  revenue_drop_impact,
+  conversion_drop_impact,
+  inventory_risk_impact,
+  refund_spike_impact
+)
+
+IMPORTANT: De-duplicate overlapping impacts.
+IF revenue_drop_impact is already capturing conversion-driven revenue loss,
+DO NOT double-count conversion_drop_impact.
+De-duplication rule: IF revenue_change_pct < -10% AND conv_rate_change_pct < -10%,
+use MAX(revenue_drop_impact, conversion_drop_impact), not the sum.
+8.4  Display Rules
+Display as: "$X,XXX at risk this month" rounded to nearest $100.
+If Revenue At Risk = 0 or no anomalies active: display "No active revenue risk detected."
+Revenue At Risk resets when its underlying anomalies are resolved.
+SECTION 9  ·  Revenue Opportunity
+9. Revenue Opportunity
+9.1  Definition
+Revenue Opportunity estimates the monthly revenue available through identified operational improvements. Unlike Revenue At Risk (which measures current losses), Revenue Opportunity measures potential gains. It is available on Growth and Agency plans only. Revenue Opportunity figures are conservative estimates — always err toward underestimating opportunity.
+9.2  Opportunity Types & Formulas
+9.2.1  Inventory Expansion Opportunity
+Triggered when a high-revenue variant is consistently selling out before the next restock.
+Inventory Expansion → Monthly Revenue Opportunity
+stockout_days_per_month = COUNT(days where variant_quantity = 0 AND daily_units_sold_avg > 0, last 30 days)
+missed_revenue = stockout_days_per_month × daily_units_sold_avg × variant_price × 0.70
+
+Multiplier 0.70 = conservative recovery factor (not all stockout demand converts on restock)
+Include IF: stockout_days_per_month >= 3 AND revenue_contribution >= 5%
+9.2.2  Conversion Improvement Opportunity
+Triggered when conversion rate is below the store's own historical peak. Not triggered during an active conversion drop anomaly (Revenue At Risk takes precedence).
+Conversion Improvement → Monthly Revenue Opportunity
+conv_rate_peak_90d = MAX(daily_conversion_rate, last 90 days)
+conv_rate_gap = conv_rate_peak_90d - conv_rate_28d_avg  [percentage points]
+IF conv_rate_gap >= 0.5 percentage points:
+  potential_additional_orders = sessions_28d_avg × (conv_rate_gap / 100) × 30.44
+  conversion_opportunity = potential_additional_orders × avg_order_value_28d × 0.50
+
+Multiplier 0.50 = conservative recovery factor (50% of gap is practically recoverable)
+Requires GA4. Not available without sessions data.
+9.2.3  Product Optimisation Opportunity
+Triggered when a high-traffic product has significantly lower conversion than the store average.
+Product Optimisation — V1 Status
+Requires GA4 product-level data (out of scope for V1 without GA4 e-commerce tracking).
+V1: SKIP this calculation if GA4 e-commerce events are not confirmed available.
+Flag for V2 implementation.
+9.3  Total Revenue Opportunity
+Total Revenue Opportunity
+total_revenue_opportunity = SUM(
+  inventory_expansion_opportunity,
+  conversion_improvement_opportunity
+)
+
+Display as: 'Up to $X,XXX opportunity identified' rounded to nearest $100.
+Never present as guaranteed revenue. Always frame as estimated opportunity.
+9.4  Plan Availability
+PLAN GATE
+Revenue Opportunity Engine is available on Growth and Agency plans only. Starter plan merchants see a locked state with an upgrade prompt. The calculations still run — only the display is gated.
+SECTION 10  ·  Confidence Score
+10. Confidence Score
+10.1  Definition
+The Confidence Score (0–100) represents StorePilot's certainty that a detected anomaly or generated recommendation is based on reliable, sufficient data. It is not a measure of how severe the issue is — it is a measure of how trustworthy the signal is. Low confidence does not mean the issue is unimportant; it means the data supporting the conclusion is limited.
+AI RULE
+AI must never claim certainty when confidence is below 60. At low confidence, the AI must use qualifying language: 'Based on limited data, this may indicate...' or 'With more data, this signal will become clearer.'
+10.2  Confidence Levels
+Score Range
+Label
+AI Language
+Definition
+90–100
+Very High
+"This indicates..."
+30+ days of data. Clear, sustained signal well above threshold.
+75–89
+High
+"This strongly suggests..."
+14+ days of data. Clear signal above threshold.
+60–74
+Moderate
+"This likely indicates..."
+7+ days of data. Signal above threshold but short history.
+< 60
+Low
+"Early data suggests..."
+Fewer than 7 days of data or signal barely above threshold.
+10.3  Confidence Calculation Formula
+Confidence Score Formula
+confidence_score = data_sufficiency_score × 0.50
+                 + signal_strength_score  × 0.35
+                 + data_consistency_score × 0.15
+10.3.1  Data Sufficiency Score (0–100)
+Data Sufficiency Score
+IF days_of_data >= 30  THEN data_sufficiency_score = 100
+IF days_of_data >= 14  THEN data_sufficiency_score = 70 + ((days - 14) / 16) × 30
+IF days_of_data >= 7   THEN data_sufficiency_score = 40 + ((days - 7)  / 7)  × 30
+IF days_of_data >= 3   THEN data_sufficiency_score = 10 + ((days - 3)  / 4)  × 30
+IF days_of_data < 3    THEN data_sufficiency_score = 0
+10.3.2  Signal Strength Score (0–100)
+Signal Strength Score
+signal_ratio = |actual_change_pct| / |threshold_pct|
+
+IF signal_ratio >= 3.0  THEN signal_strength_score = 100
+IF signal_ratio >= 2.0  THEN signal_strength_score = 80
+IF signal_ratio >= 1.5  THEN signal_strength_score = 65
+IF signal_ratio >= 1.0  THEN signal_strength_score = 50
+IF signal_ratio < 1.0   THEN signal_strength_score = 0  [below threshold; no anomaly]
+
+Example: Revenue drop of -30% vs -15% threshold → signal_ratio = 2.0 → score = 80
+10.3.3  Data Consistency Score (0–100)
+Data Consistency Score (coefficient of variation)
+daily_variance = STDEV(daily_metric_values, last 14 days) / AVG(daily_metric_values, last 14 days)
+
+IF daily_variance <= 0.10  THEN data_consistency_score = 100  [very consistent]
+IF daily_variance <= 0.20  THEN data_consistency_score = 80
+IF daily_variance <= 0.40  THEN data_consistency_score = 60
+IF daily_variance <= 0.60  THEN data_consistency_score = 40
+IF daily_variance >  0.60  THEN data_consistency_score = 20  [highly variable data]
+SECTION 11  ·  Priority Score
+11. Priority Score
+11.1  Definition
+The Priority Score determines the ranking order of issues and recommendations displayed in the Issues Center and Priority Issues dashboard section. Higher priority scores are displayed first. Priority is a function of three factors: how much revenue is at stake, how confident the signal is, and how urgent the issue is.
+11.2  Priority Formula
+Priority Score Formula (from Founder Specification: Revenue Impact × Confidence × Urgency)
+priority_score = revenue_impact_score × confidence_factor × urgency_factor
+
+Range: 0 to 1,000,000 (not normalised to 0–100 to preserve relative ordering resolution)
+11.2.1  Revenue Impact Score (0–100)
+Revenue Impact Score
+revenue_impact_score = MIN(100, (monthly_revenue_at_risk / monthly_revenue_baseline) × 100)
+
+Example: $3,000 at risk on a $20,000/month store
+  → (3000 / 20000) × 100 = 15 → revenue_impact_score = 15
+
+Example: $18,000 at risk on a $20,000/month store
+  → (18000 / 20000) × 100 = 90 → revenue_impact_score = 90
+11.2.2  Confidence Factor (0.1–1.0)
+Confidence Factor
+confidence_factor = confidence_score / 100
+
+Minimum value: 0.10 (issues are never scored as zero priority due to low confidence)
+confidence_factor = MAX(0.10, confidence_score / 100)
+11.2.3  Urgency Factor (1.0–3.0)
+Urgency Factor
+Urgency is determined by days until the issue causes irreversible harm:
+
+IF anomaly_type = inventory_risk:
+  IF days_remaining <= 3   THEN urgency_factor = 3.0
+  IF days_remaining <= 7   THEN urgency_factor = 2.0
+  IF days_remaining <= 14  THEN urgency_factor = 1.5
+
+IF anomaly_type = revenue_drop OR conversion_drop:
+  IF active for <= 2 days   THEN urgency_factor = 2.0  [new, act now]
+  IF active for <= 7 days   THEN urgency_factor = 1.5
+  IF active for >  7 days   THEN urgency_factor = 1.0  [ongoing]
+
+IF anomaly_type = refund_spike:
+  urgency_factor = 1.5 always
+
+IF anomaly_type = traffic_drop:
+  urgency_factor = 1.2 always
+11.3  Priority Labels
+Priority Score Range
+Label
+Dashboard Behaviour
+>= 50,000
+Critical
+Top of Issues Center. Red badge. Triggers critical alert notification.
+10,000–49,999
+High
+Near top of Issues Center. Amber badge.
+2,000–9,999
+Medium
+Standard position in Issues Center. Blue badge.
+< 2,000
+Low
+Bottom of Issues Center. Grey badge.
+SECTION 12  ·  Data Requirements & Missing Data Handling
+12. Data Requirements & Missing Data Handling
+12.1  Minimum Data Requirements by Metric
+Metric
+Min Days Required
+Data Source
+Behaviour if Insufficient
+Revenue Health
+3 days
+Shopify Orders
+Score = 50 (neutral). Flagged as insufficient data.
+Conversion Health
+3 days + GA4
+Shopify + GA4
+GA4 fallback used if no GA4. Score = 50 if < 3 days.
+Inventory Health
+3 days velocity
+Shopify Inventory
+Variants with no sales excluded. Score based on available variants.
+Refund Health
+3 days
+Shopify Refunds
+Score = 75 (assume healthy). Absolute threshold only.
+Traffic Health
+3 days + GA4
+GA4 only
+Score = null. Weight redistributed.
+Store Health Score
+2+ components
+All sources
+Score = null if < 2 components available.
+Revenue At Risk
+7 days
+Shopify
+= 0 if insufficient data for anomaly detection.
+Confidence Score
+0 days (always computable)
+Derived
+Low confidence (<60) if data is sparse.
+12.2  Missing Data Handling Rules
+Missing days in a time series: do not interpolate or fill with zeros. Use only available data points for averages. Document the data gap.
+Shopify API timeout or error: use last successfully synced data. Mark affected metrics as stale with a timestamp.
+Partial day data (today's data, sync in progress): exclude the current partial day from rolling averages. Use completed days only.
+Metric cannot be computed: display 'Calculating...' on the dashboard. Never display a metric value derived from incomplete data without a staleness indicator.
+Null metric values must never be formatted as 0 in the UI. 0 is a valid metric value and means something different from 'no data'.
+12.3  Stale Data Indicators
+A metric is considered stale if its underlying data is older than the freshness requirement defined in Section 1.4. Stale metrics must be visually indicated in the dashboard. Stale metrics are included in Store Health Score calculations but excluded from anomaly detection to prevent false positives from outdated data.
+SECTION 13  ·  GA4 Dependency Rules
+13. GA4 Dependency Rules
+13.1  GA4 as Optional Integration
+Google Analytics 4 is an optional integration in StorePilot V1. All core functionality works without GA4, with reduced precision on Conversion Health and complete absence of Traffic Health. StorePilot must clearly communicate the value of connecting GA4 without blocking core functionality.
+13.2  Impact of GA4 Absence by Metric
+Metric
+Without GA4
+With GA4
+Revenue Health
+Fully functional. No GA4 dependency.
+Fully functional.
+Conversion Health
+Uses order-volume proxy. Reduced precision. Label shown: 'Estimated'.
+Uses actual session/order conversion rate.
+Inventory Health
+Fully functional. No GA4 dependency.
+Fully functional.
+Refund Health
+Fully functional. No GA4 dependency.
+Fully functional.
+Traffic Health
+Score = null. Excluded from Store Health Score. Weight redistributed.
+Fully functional.
+Store Health Score
+4-component calculation with redistributed weights.
+5-component calculation with standard weights.
+Traffic Drop Anomaly
+Cannot be detected.
+Detected when sessions drop >= 20%.
+Checkout Drop Anomaly
+Cannot be detected.
+Detected when checkout completion rate drops significantly.
+Revenue Opportunity: Conversion
+Cannot be calculated without sessions data.
+Calculated using sessions × conversion gap.
+13.3  GA4 Prompts
+During onboarding: GA4 connection is presented as optional but strongly recommended, with specific benefit text: 'Connect GA4 to unlock Traffic Health scoring, Conversion Rate tracking, and Traffic Drop anomaly detection.'
+In dashboard: if GA4 is not connected, a persistent (but dismissible) in-line prompt is shown in the Traffic Health section.
+When a Traffic Drop or Checkout Drop anomaly would have fired: show a locked anomaly card: 'Connect GA4 to detect traffic drops.'
+GA4 prompts must never block core functionality or dashboard access.
+SECTION 14  ·  Acceptance Criteria
+14. Acceptance Criteria
+14.1  Health Score Calculations
+ID
+Acceptance Criterion
+Priority
+H-01
+Store Health Score is calculated as a weighted average of component scores using weights: Revenue 30%, Conversion 25%, Inventory 20%, Refund 15%, Traffic 10%. Output is an integer 0–100.
+CRITICAL
+H-02
+When GA4 is not connected, Traffic Health is null and the remaining four component weights are scaled by 1.1111 to sum to 100%.
+CRITICAL
+H-03
+Store Health Score displays 'Calculating...' if fewer than 2 component scores are available.
+HIGH
+H-04
+Component health scores map revenue_change_pct to score ranges per Section 2.4. Boundary values (exactly -15%, exactly -30%) fall in the lower bracket.
+CRITICAL
+H-05
+Inventory Health is a revenue-weighted average of variant scores, not a simple average.
+CRITICAL
+14.2  Anomaly Detection
+ID
+Acceptance Criterion
+Priority
+A-01
+Revenue drop anomaly fires when revenue_change_pct <= -15% (7-day avg vs 28-day avg). Does not fire at -14.9%.
+CRITICAL
+A-02
+Conversion drop anomaly fires when conv_rate_change_pct <= -10%.
+CRITICAL
+A-03
+Inventory risk anomaly fires when days_inventory_remaining <= 14 AND variant revenue contribution >= 5% of 28-day store revenue.
+CRITICAL
+A-04
+Refund spike anomaly fires when refund_rate_change_pct >= +50% (50% increase in refund rate, not 50% absolute).
+CRITICAL
+A-05
+Traffic drop anomaly fires only when GA4 is connected and sessions_change_pct <= -20%.
+CRITICAL
+A-06
+Anomalies do not fire when underlying data is marked as stale.
+HIGH
+14.3  Revenue At Risk & Opportunity
+ID
+Acceptance Criterion
+Priority
+R-01
+Revenue At Risk is the sum of per-anomaly monetary impact estimates using the formulas in Section 8.2. De-duplication logic is applied when revenue drop and conversion drop overlap.
+CRITICAL
+R-02
+Revenue At Risk displays as $0 when no active anomalies exist. Displays 'No active revenue risk detected.'
+HIGH
+R-03
+Revenue Opportunity is only displayed to Growth and Agency plan merchants. Starter merchants see a locked state.
+CRITICAL
+R-04
+Inventory expansion opportunity uses a 0.70 recovery factor. Conversion improvement opportunity uses a 0.50 recovery factor. These factors are not configurable by merchants.
+HIGH
+14.4  Confidence & Priority
+ID
+Acceptance Criterion
+Priority
+C-01
+Confidence score is computed using the three-factor formula: data_sufficiency (50%) + signal_strength (35%) + data_consistency (15%).
+CRITICAL
+C-02
+AI output language matches confidence level: 'indicates' (Very High), 'strongly suggests' (High), 'likely indicates' (Moderate), 'early data suggests' (Low).
+HIGH
+P-01
+Priority score = revenue_impact_score × confidence_factor × urgency_factor. Issues are displayed in descending priority score order.
+CRITICAL
+P-02
+Confidence factor has a minimum value of 0.10. Priority score is never zero due to low confidence alone.
+HIGH
+14.5  AI Non-Calculation
+ID
+Acceptance Criterion
+Priority
+AI-01
+No AI prompt in any feature includes a request to calculate percentages, revenue figures, averages, or metric scores. All such values are pre-computed and passed as context.
+CRITICAL
+AI-02
+All numeric values in AI outputs match the pre-computed values passed in context. AI does not generate its own numbers.
+CRITICAL
+SECTION 15  ·  Future Scalability Considerations
+15. Future Scalability Considerations
+These items are architectural considerations for future evolution of StorePilot's metrics engine. None are V1 deliverables.
+15.1  Seasonality Adjustment
+V1 baselines use rolling averages which naturally smooth moderate seasonality. A future seasonality model would use same-period year-ago comparisons (YoY) rather than rolling averages for stores with 12+ months of data. The data schema must support storing 12+ months of daily metrics for this future calculation. The history_days field in plan_entitlements already supports this.
+15.2  Peer Benchmarking
+Future versions could compare a store's health scores against anonymised aggregate benchmarks for similar stores (same Shopify category, similar revenue range). V1 does not implement this — all scoring is relative to each store's own baseline. The foundation for peer benchmarking is the ai_cost_daily and store_metrics_daily tables, which accumulate cross-store data over time.
+15.3  Custom Anomaly Thresholds
+V1 uses fixed thresholds defined in the Founder Specification (-15% revenue, -10% conversion, 14 days inventory, +50% refunds, -20% traffic). Future versions could allow merchants to configure custom sensitivity levels. The anomaly detection engine must be designed to accept threshold parameters rather than hard-coding them.
+15.4  Product-Level Health Scores
+V1 computes Inventory Health at the variant level but aggregates to a store-level score. Future product_metrics_daily data enables individual product health scoring, allowing merchants to see which specific products are dragging down their Store Health Score.
+15.5  Real-Time Scoring
+V1 calculates health scores hourly (post-sync). As Shopify webhooks provide real-time revenue and inventory events, a future real-time scoring engine could update component scores within seconds of a significant event (e.g. a sudden order spike or a product going out of stock). The webhook-based sync architecture defined in the Founder Specification is the prerequisite for this.
+15.6  Checkout Funnel Metrics
+The Founder Specification includes Checkout Drop as a GA4-dependent anomaly. V1 defines the trigger as a 'significant decline in checkout completion' without a precise formula because GA4 checkout funnel data requires e-commerce event configuration on the merchant's GA4 property. A V2 implementation would define a precise checkout_completion_rate formula and integrate it into Conversion Health.
+15.7  Multi-Currency Handling
+V1 assumes all monetary calculations are in the store's default currency as reported by Shopify. Multi-currency stores (Shopify Markets) may report revenue in multiple currencies. A future multi-currency normalisation layer would convert all revenue to a single reporting currency before metric calculation. The Revenue At Risk and Revenue Opportunity outputs would need a currency_code field added to support this.
+StorePilot Metrics & Scoring Specification v1.0  ·  Confidential  ·  Deterministic calculations. AI explains. AI does not calculate.

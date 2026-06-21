@@ -1,0 +1,1392 @@
+STOREPILOT
+AI Operational Intelligence Platform for Shopify
+ENGINEERING ROADMAP
+Version 1.0  |  10 Phases  |  ~30 Weeks to Public Launch
+Based on Founder Specification v1.0
+Table of Contents
+Engineering Roadmap — Executive Summary
+This document is the complete engineering roadmap for StorePilot v1.0. It breaks development into 10 sequential phases, from environment setup through public launch. Each phase is fully specified with objectives, deliverables, dependencies, engineering tasks, risks, and a definition of done.
+All phases and tasks are derived exclusively from the StorePilot Founder Specification v1.0. No features have been invented or added beyond that specification.
+Phase Overview
+Phase
+Name
+Timeline
+Primary Output
+0
+Environment Setup
+Week 1
+Fully configured dev environment, CI/CD pipeline, infrastructure provisioned
+1
+Shopify App Foundation
+Weeks 2–4
+Working Shopify OAuth, onboarding flow, core database schema, base dashboard shell
+2
+Data Synchronization
+Weeks 5–7
+Webhooks live, hourly sync jobs running, 90-day historical import working
+3
+Metrics Engine
+Weeks 8–10
+Store Health Score, Revenue At Risk, Revenue Opportunity — all deterministic
+4
+Anomaly Detection Engine
+Weeks 11–13
+All 6 anomaly types detecting correctly, Issues Center live
+5
+AI COO Layer
+Weeks 14–17
+Daily COO Briefing, Recommendations with 5 components, AI COO Chat live
+6
+Operational Memory
+Weeks 18–19
+Business Timeline, Recommendation Tracking, Outcome recording, AI COO Impact Score
+7
+Notifications & Comms
+Weeks 20–21
+Email briefings, Critical alerts, Weekly COO Report, Monthly Review live
+8
+Beta Launch
+Weeks 22–25
+5–20 beta merchants onboarded, issues resolved, readiness confirmed
+9
+Public Launch
+Weeks 26–30
+Shopify App Store listing live, billing active, all three plans available
+Estimated Timeline
+Total Duration
+~30 weeks from Phase 0 kick-off to Public Launch
+Phase 0–2 (Foundation)
+Weeks 1–7  — infrastructure, auth, data sync
+Phase 3–5 (Intelligence)
+Weeks 8–17 — engines, anomaly detection, AI layer
+Phase 6–7 (Memory/Comms)
+Weeks 18–21 — operational memory, notification system
+Phase 8–9 (Launch)
+Weeks 22–30 — beta validation, public launch
+Engineering Priority Framework
+Throughout all phases, tasks are labeled with the following priority:
+Priority
+Meaning
+Gate
+P1
+Must complete — phase cannot close without it
+Phase Definition of Done
+P2
+Should complete — important but non-blocking for phase close
+Sprint-level tracking
+P3
+Nice to have — defer to next phase if time-constrained
+Backlog
+The AI/deterministic boundary is a non-negotiable architectural constraint throughout the entire roadmap. All numerical calculations must be implemented in deterministic engine functions. AI calls receive pre-computed values. Violations of this rule in any phase must be treated as critical bugs.
+Phase 0: Environment Setup
+Phase 0  Environment Setup    ⚙️  Week 1
+🎯  Objectives
+Provision and configure all infrastructure required for development
+Establish CI/CD pipeline from day one — not bolted on later
+Configure Vercel, Supabase, and all required third-party service accounts
+Establish environment variable management and secret hygiene
+Define and commit coding standards, PR process, and branch strategy
+Ensure every developer can run the full stack locally within one command
+📦  Deliverables
+Git repository initialized with Next.js project structure and Prisma configured
+Vercel project created, connected to repository, with preview deployments working
+Supabase project provisioned with connection strings in Vercel env vars
+All third-party accounts created: Shopify Partner account, OpenAI, Resend, GA4 OAuth app
+CI pipeline: lint, type-check, and test gates on all pull requests
+.env.example committed; .env.local gitignored
+CONTRIBUTING.md with branch strategy, PR template, and code review process
+🔗  Dependencies
+No engineering dependencies — this is the bootstrapping phase
+Requires: team access to Shopify Partner Dashboard, Vercel account, Supabase account, OpenAI API account, Resend account
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T0-01
+Infrastructure
+Create Vercel project, connect GitHub repository, enable preview deployments
+P1
+T0-02
+Infrastructure
+Provision Supabase project (development + staging environments), note connection strings
+P1
+T0-03
+Infrastructure
+Configure Vercel environment variables for all required secrets (see Technical PRD Section 17)
+P1
+T0-04
+App Setup
+Initialize Next.js project with TypeScript, App Router, Tailwind CSS
+P1
+T0-05
+Database
+Initialize Prisma with PostgreSQL provider, configure DATABASE_URL and DIRECT_URL
+P1
+T0-06
+Database
+Write and run initial Prisma migration with stores table skeleton to validate DB connection
+P1
+T0-07
+Integrations
+Create Shopify Partner account, register app, obtain SHOPIFY_API_KEY and SHOPIFY_API_SECRET
+P1
+T0-08
+Integrations
+Create OpenAI API account, obtain OPENAI_API_KEY, confirm model availability
+P1
+T0-09
+Integrations
+Create Resend account, verify sending domain, obtain RESEND_API_KEY
+P1
+T0-10
+Integrations
+Create Google Cloud project for GA4 OAuth, configure OAuth consent screen, obtain credentials
+P1
+T0-11
+CI/CD
+Configure GitHub Actions: lint + type-check + test on push/PR
+P1
+T0-12
+CI/CD
+Configure automatic Vercel preview deployments on PR, staging deploy on main merge
+P1
+T0-13
+Standards
+Commit .env.example, .gitignore, CONTRIBUTING.md, PR template
+P1
+T0-14
+Standards
+Define folder structure per Technical PRD Section 3.1, commit skeleton directories
+P2
+T0-15
+Local Dev
+Create docker-compose.yml for local PostgreSQL (developers without Supabase access)
+P2
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Shopify Partner account approval takes longer than expected
+Low
+Apply on Day 1; process is typically immediate for new apps
+Developers have inconsistent local environments causing 'works on my machine' issues
+Medium
+Use docker-compose for local DB; document exact Node version in .nvmrc
+Secrets accidentally committed to version control
+High
+Configure pre-commit hook with git-secrets; add secret scanning to CI pipeline
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+A developer can clone the repository and run the app locally with one command (npm run dev or equivalent)
+2
+Vercel preview deployment triggers automatically on pull request creation
+3
+Supabase database accepts connections from local environment and Vercel functions
+4
+CI pipeline blocks merge on lint failure, type errors, or test failures
+5
+No secrets are present in any committed file
+6
+All required third-party accounts are created and credentials are in Vercel env vars
+7
+Prisma connects to Supabase and initial migration has run successfully
+Phase 1: Shopify App Foundation
+Phase 1  Shopify App Foundation    🏪  Weeks 2–4
+🎯  Objectives
+Implement complete Shopify OAuth 2.0 authentication flow
+Build the 7-step onboarding wizard targeting sub-2-minute completion
+Deploy the full database schema for all 14 entities
+Render the dashboard shell with all 5 sections (empty state UI)
+Implement Shopify uninstall webhook handler for clean store deactivation
+Establish multi-tenant session management scoped by storeId
+📦  Deliverables
+Shopify OAuth install and callback flow working end-to-end
+Complete Prisma schema for all 14 database entities with migrations
+7-step onboarding wizard UI rendered and functional
+Protected dashboard route structure with all 5 sections in empty state
+app/uninstalled webhook registered and functional
+Session middleware validating storeId on all protected routes
+🔗  Dependencies
+Phase 0 complete — all infrastructure and Shopify Partner credentials available
+Shopify API key and secret configured in Vercel env vars
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T1-01
+Auth
+Implement GET /api/shopify/oauth/initiate — build OAuth URL with scopes, state nonce, redirect_uri
+P1
+T1-02
+Auth
+Implement GET /api/shopify/oauth/callback — validate state, HMAC, exchange code for access token
+P1
+T1-03
+Auth
+Implement AES-256 column-level encryption for accessToken before DB write
+P1
+T1-04
+Auth
+Implement session management (iron-session or equivalent) — HTTP-only encrypted cookie
+P1
+T1-05
+Auth
+Implement session validation middleware for all protected API routes
+P1
+T1-06
+Auth
+Implement POST /api/shopify/webhook/uninstall — mark store as active = false, zero tokens
+P1
+T1-07
+Auth
+Implement HMAC-SHA256 webhook validation utility — used by all webhook handlers
+P1
+T1-08
+Database
+Write complete Prisma schema for all 14 entities with enums, indexes, and relations
+P1
+T1-09
+Database
+Run and commit full migration — all tables, indexes, and constraints deployed to staging
+P1
+T1-10
+Onboarding
+Build Step 1–2: Install App + Connect Shopify UI (OAuth trigger)
+P1
+T1-11
+Onboarding
+Build Step 3: Connect GA4 UI with skip option
+P1
+T1-12
+Onboarding
+Build Steps 4–7: Progress indicator during import, audit, report generation, dashboard redirect
+P1
+T1-13
+Dashboard
+Build dashboard layout with 5 section shells in empty state (loading skeletons)
+P1
+T1-14
+Dashboard
+Implement route protection: redirect unauthenticated requests to /auth/shopify
+P1
+T1-15
+Dashboard
+Build Section 1 shell: AI COO Status Card with placeholder values
+P2
+T1-16
+Dashboard
+Build Section 5 shell: AI COO Chat input/output UI (no backend yet)
+P2
+T1-17
+Testing
+Write integration tests for OAuth flow (initiate → callback → session creation)
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Shopify OAuth consent screen requires app review before working on real stores
+Medium
+Use development store in Partner account; real stores available immediately for private apps
+Onboarding exceeds 2-minute target if historical import blocks the UI
+High
+Background the historical import immediately after OAuth; don't block UI on import completion
+Session management complexity with multiple concurrent stores
+Low
+Scope every session and DB query by storeId from the first line of middleware
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+A test Shopify development store can install the app end-to-end via OAuth without errors
+2
+Store record is created in database with encrypted accessToken after OAuth completion
+3
+app/uninstalled webhook sets active = false and zeros token fields within 5 seconds
+4
+All 14 database tables exist in staging Supabase with correct schema, types, and indexes
+5
+Onboarding renders all 7 steps and completes without errors on a fresh store install
+6
+Dashboard loads at /dashboard with all 5 sections in empty state without JavaScript errors
+7
+Any unauthenticated request to /dashboard or API routes returns 401 or redirect
+8
+HMAC validation rejects webhooks with invalid signatures (verified with test payload)
+Phase 2: Data Synchronization
+Phase 2  Data Synchronization    🔄  Weeks 5–7
+🎯  Objectives
+Implement all Shopify webhook handlers for real-time data ingestion
+Build all scheduled cron sync jobs as the reliability fallback layer
+Implement the 90-day historical import triggered at onboarding completion
+Build and validate the GA4 OAuth flow and 6-hour sync job
+Populate all five metrics tables (store_metrics_daily, product_metrics_daily, inventory_daily, traffic_daily, products)
+Implement idempotency on all webhook handlers to prevent duplicate processing
+Implement SyncState tracking per store
+📦  Deliverables
+All 8 Shopify webhook topics registered and handling payloads correctly
+8 Vercel Cron Jobs configured in vercel.json and running on schedule
+Historical import completing for a test store within the 2-minute onboarding window
+GA4 OAuth flow working end-to-end; traffic_daily being populated on 6-hour schedule
+All five metrics tables populated with real data from a connected test store
+Webhook idempotency verified — duplicate deliveries do not create duplicate records
+🔗  Dependencies
+Phase 1 complete — Shopify OAuth, database schema, and session management all working
+Shopify app configured with webhook subscriptions in Partner Dashboard
+Vercel Cron enabled on the project plan (Pro plan or higher)
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T2-01
+Webhooks
+Implement POST /api/shopify/webhook/orders — handle orders/create, orders/updated, orders/cancelled
+P1
+T2-02
+Webhooks
+Implement POST /api/shopify/webhook/refunds — handle refunds/create
+P1
+T2-03
+Webhooks
+Implement POST /api/shopify/webhook/inventory — handle inventory_levels/update
+P1
+T2-04
+Webhooks
+Implement POST /api/shopify/webhook/products — handle products/create, products/update
+P1
+T2-05
+Webhooks
+Add idempotency key check to all webhook handlers using Shopify webhook id field
+P1
+T2-06
+GraphQL
+Implement Shopify GraphQL client with rate-limit-aware retry (exponential backoff, 3 retries)
+P1
+T2-07
+GraphQL
+Write paginated GetOrders query (cursor-based) for orders/revenue sync
+P1
+T2-08
+GraphQL
+Write paginated GetInventoryLevels query
+P1
+T2-09
+GraphQL
+Write paginated GetProducts query
+P1
+T2-10
+Historical
+Implement POST /api/sync/historical — orchestrate full 90-day import for a store
+P1
+T2-11
+Historical
+Historical import aggregates raw orders/refunds into store_metrics_daily rows (daily totals)
+P1
+T2-12
+Historical
+Historical import populates products and product_metrics_daily tables
+P1
+T2-13
+Historical
+Historical import populates inventory_daily with avgDailySales and daysOfStockLeft calculations
+P1
+T2-14
+Cron
+Configure vercel.json with all 8 cron job schedules
+P1
+T2-15
+Cron
+Implement GET /api/cron/sync-hourly — delta sync for revenue, inventory, refunds across all active stores
+P1
+T2-16
+Cron
+Implement GET /api/cron/sync-6h — sync products and GA4 data
+P1
+T2-17
+Cron
+Implement GET /api/cron/sync-daily — sync customer metrics
+P1
+T2-18
+Cron
+Implement CRON_SECRET validation on all cron endpoints — return 401 on invalid header
+P1
+T2-19
+Cron
+Implement Promise.allSettled fan-out pattern — one store failure must not block others
+P1
+T2-20
+GA4
+Implement GET /api/ga4/oauth/initiate and /callback — Google OAuth for GA4 read scope
+P1
+T2-21
+GA4
+Implement GA4 Data API client — runReport for daily sessions and checkout funnel metrics
+P1
+T2-22
+GA4
+Populate traffic_daily table from GA4 sync (only when GA4 connected)
+P1
+T2-23
+Sync State
+Update stores.lastOrdersSyncAt, lastInventorySyncAt, etc. after each successful sync
+P1
+T2-24
+Testing
+Integration test: verify idempotency — send same webhook payload twice, assert one DB record created
+P1
+T2-25
+Testing
+Integration test: historical import on test store produces correct daily totals
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Shopify API rate limits hit during historical import for high-volume stores (10k+ orders in 90 days)
+High
+Implement cost-aware batching; use cursor pagination with conservative page sizes; add delay between pages if cost threshold is approached
+Vercel function timeout (60s) exceeded during large historical imports
+High
+Chunk imports into sequential batches; trigger next chunk via background job; don't block onboarding UI — show progress indicator instead
+GA4 API changes break the sync integration
+Medium
+GA4 is optional — degrade gracefully; monitor GA4 API deprecation notices; abstract behind interface
+Duplicate data created by concurrent webhook + cron sync running simultaneously
+Medium
+Idempotency keys on all writes; use DB UNIQUE constraints as final safety net
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+Historical import for a test store with 3 months of orders completes within 90 seconds
+2
+store_metrics_daily has one row per day for the past 90 days after historical import
+3
+All 8 webhook topics deliver to the app without 4xx/5xx errors
+4
+Sending the same webhook payload twice creates exactly one record (idempotency verified)
+5
+All cron endpoints return 401 when called without the correct CRON_SECRET header
+6
+Hourly cron runs and updates lastOrdersSyncAt for all active stores
+7
+GA4 OAuth connects successfully; traffic_daily is populated after next 6-hour cron run
+8
+inventory_daily.atRisk is correctly set to true when daysOfStockLeft <= 14
+Phase 3: Metrics Engine
+Phase 3  Metrics Engine    📊  Weeks 8–10
+🎯  Objectives
+Implement the Store Health Score formula as a deterministic engine function
+Implement the Revenue Impact Engine — translate anomalies to monthly monetary impact
+Implement the Revenue At Risk and Revenue Opportunity aggregate calculations
+Implement the Confidence Engine — produce calibrated confidence levels
+Implement the Recommendation Priority formula (Revenue Impact × Confidence × Urgency)
+Populate Section 1 of the dashboard (AI COO Status Card) with live computed values
+All calculations must be pure TypeScript functions with zero external dependencies
+📦  Deliverables
+lib/engines/health-score.ts — Store Health Score calculation (5 dimensions, weighted)
+lib/engines/revenue-impact.ts — Revenue At Risk and Revenue Opportunity in monetary terms
+lib/engines/confidence.ts — Confidence Level classification (Very High / High / Moderate / Low)
+lib/engines/recommendation.ts — Priority Score formula
+Dashboard Section 1 (AI COO Status Card) displaying live values
+GET /api/dashboard/status endpoint returning all Section 1 data
+100% unit test coverage on all engine functions
+🔗  Dependencies
+Phase 2 complete — metrics tables (store_metrics_daily, inventory_daily, traffic_daily) must have real data to validate engine outputs
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T3-01
+Engine
+Implement lib/engines/health-score.ts — weighted sum: Revenue 30%, Conversion 25%, Inventory 20%, Refund 15%, Traffic 10%
+P1
+T3-02
+Engine
+Handle GA4 not connected in health score: exclude Traffic dimension and rescale remaining 4 dimensions to sum to 100%
+P1
+T3-03
+Engine
+Implement lib/engines/revenue-impact.ts — translate active anomalies to monthly Revenue At Risk in store currency
+P1
+T3-04
+Engine
+Implement Revenue Opportunity calculation — estimate monthly upside per improvement type
+P1
+T3-05
+Engine
+Implement lib/engines/confidence.ts — classify score: Very High (90–100), High (75–89), Moderate (60–74), Low (<60)
+P1
+T3-06
+Engine
+Confidence inputs: data point count, recency (days since last data), signal consistency
+P1
+T3-07
+Engine
+Implement lib/engines/recommendation.ts — Priority Score = revenueImpact × confidenceScore × urgency
+P1
+T3-08
+Cron
+Add health score recalculation step to post-sync cron: write updated scores to store_metrics_daily and inventory_daily
+P1
+T3-09
+Cron
+Implement GET /api/cron/health-score — recalculate and persist health scores for all active stores after anomaly detection
+P1
+T3-10
+API
+Implement GET /api/dashboard/status — return HealthScore, RevenueAtRisk, RevenueOpportunity, criticalIssueCount, warningIssueCount
+P1
+T3-11
+Dashboard
+Wire Section 1 (AI COO Status Card) to GET /api/dashboard/status — render all 5 values with loading states
+P1
+T3-12
+Testing
+Unit tests for health-score.ts: test all 5 dimension weights, GA4-absent rescaling, edge case (all zeros)
+P1
+T3-13
+Testing
+Unit tests for revenue-impact.ts: verify monetary output for each anomaly type
+P1
+T3-14
+Testing
+Unit tests for confidence.ts: verify all 4 level classifications with boundary values
+P1
+T3-15
+Testing
+Unit tests for recommendation.ts: verify priority formula with known inputs
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Revenue At Risk formula produces counterintuitive or inaccurate monetary estimates for certain store types
+High
+Validate outputs manually against 3+ test stores before Phase 3 closes; adjust baseline calculation methodology if needed
+Health Score feels static or unresponsive to real store changes
+Medium
+Ensure health dimension scores are recalculated every hourly sync cycle, not just daily
+Confidence scores are too conservative, making recommendations appear Low-confidence to all merchants
+Medium
+Calibrate confidence inputs empirically on test stores; adjust thresholds based on signal quality in real data
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+health-score.ts produces a score between 0–100 for any valid MetricsSnapshot input
+2
+When GA4 is not connected, the health score is calculated correctly without the Traffic dimension
+3
+Revenue At Risk is a monetary figure denominated in the store's currency
+4
+Confidence Engine correctly classifies all 4 levels at their defined threshold boundaries
+5
+Priority Score formula produces consistent numeric output for given inputs
+6
+All engine functions have 100% unit test coverage with no failing tests
+7
+GET /api/dashboard/status responds in under 200ms P95 on staging data
+8
+Dashboard Section 1 renders all 5 values correctly on a live test store
+Phase 4: Anomaly Detection Engine
+Phase 4  Anomaly Detection Engine    ⚠️  Weeks 11–13
+🎯  Objectives
+Implement all 6 anomaly detectors using the deterministic thresholds from the Founder Specification
+Build the anomaly creation pipeline: detection → issue creation → timeline event
+Build the Issues Center UI displaying active, resolved, and historical issues
+Implement recommendation generation skeleton — all 5 required fields, pre-AI stub content for testing
+Implement Priority Issues (Dashboard Section 3) ranked by priority score
+All anomaly detections must be idempotent and produce timeline events on trigger and resolution
+📦  Deliverables
+lib/engines/anomaly-detection.ts — all 6 anomaly types with correct thresholds
+GET /api/cron/detect-anomalies — post-hourly-sync anomaly detection cron job
+anomalies and anomaly_causes tables being populated on real test store data
+timeline_events generated on every anomaly trigger and resolution
+Issues Center page (/dashboard/issues) displaying active, resolved, historical issues
+Dashboard Section 3 (Priority Issues) displaying top anomalies ranked by priority score
+🔗  Dependencies
+Phase 3 complete — metrics engine, confidence engine, and revenue impact engine all working
+Phase 2 complete — metrics tables have sufficient real data to compute baselines
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T4-01
+Detection
+Implement Revenue Drop detector: trigger when revenue declines ≥15% vs 30-day rolling baseline
+P1
+T4-02
+Detection
+Implement Conversion Drop detector: trigger when conversion rate declines ≥10%
+P1
+T4-03
+Detection
+Implement Inventory Risk detector: trigger when daysOfStockLeft ≤14 for any tracked product
+P1
+T4-04
+Detection
+Implement Refund Spike detector: trigger when refund rate increases ≥50%
+P1
+T4-05
+Detection
+Implement Traffic Drop detector (GA4): trigger when daily sessions decline ≥20% — disabled without GA4
+P1
+T4-06
+Detection
+Implement Checkout Drop detector (GA4): trigger on significant checkout completion decline — disabled without GA4
+P1
+T4-07
+Detection
+Implement idempotency key generation per anomaly (storeId + type + date) — prevent duplicate anomaly rows
+P1
+T4-08
+Detection
+Implement anomaly resolution logic: mark resolvedAt when metric returns within normal range
+P1
+T4-09
+Cron
+Implement GET /api/cron/detect-anomalies — run detection engine on all active stores post-hourly sync
+P1
+T4-10
+Timeline
+Create timeline_events row on every anomaly trigger (e.g. revenue_drop_detected)
+P1
+T4-11
+Timeline
+Create timeline_events row on every anomaly resolution (e.g. revenue_recovered)
+P1
+T4-12
+Recommendations
+Build recommendation stub generator — create recommendation rows with deterministic fields; AI fields populated with '[PENDING AI]' placeholder
+P1
+T4-13
+Recommendations
+Implement POST /api/recommendations/:id/status — update status to accepted, ignored, completed
+P1
+T4-14
+API
+Implement GET /api/issues — return active/resolved/historical issues for a store with pagination
+P1
+T4-15
+Dashboard
+Build Issues Center page (/dashboard/issues) with Active, Resolved, and Historical tabs
+P1
+T4-16
+Dashboard
+Wire Dashboard Section 3 (Priority Issues) to GET /api/issues?status=active&limit=10&sort=priority
+P1
+T4-17
+Testing
+Integration test: Revenue Drop fires at exactly ≥15% decline on test data; does not fire at 14.9%
+P1
+T4-18
+Testing
+Integration test: Inventory Risk fires for product at 14 days; does not fire at 15 days
+P1
+T4-19
+Testing
+Integration test: Traffic Drop and Checkout Drop do NOT fire when GA4 is not connected
+P1
+T4-20
+Testing
+Integration test: Sending same anomaly trigger twice creates exactly one anomaly record
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Anomaly thresholds fire too frequently on volatile stores, creating noise
+High
+Add a minimum observation window (e.g. anomaly must persist for 2+ hours before creating a record) — implement as configurable constant
+Revenue baseline insufficient for stores with fewer than 14 days of history
+Medium
+Apply Low confidence level automatically for stores with < 14 days data; surface this to merchant
+Inventory Risk fires for products where merchant intentionally stocks low
+Medium
+Allow per-product inventory risk suppression (future); for V1 document as known limitation
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+All 6 anomaly types trigger correctly at their defined thresholds on synthetic test data
+2
+Revenue Drop detector does NOT trigger at 14.9% decline (threshold is ≥15%)
+3
+Traffic Drop and Checkout Drop anomalies are completely absent from detection runs when GA4 is not connected
+4
+Every anomaly trigger creates a corresponding timeline_events row within the same DB transaction
+5
+Sending the same anomaly trigger twice (concurrent cron runs) creates exactly one anomaly record
+6
+Issues Center (/dashboard/issues) displays anomalies in correct tabs with correct fields
+7
+Dashboard Section 3 displays Priority Issues ranked by priorityScore DESC
+8
+Recommendation stub records are created for every new anomaly with all required fields present
+Phase 5: AI COO Layer
+Phase 5  AI COO Layer    🤖  Weeks 14–17
+🎯  Objectives
+Replace recommendation stub content with AI-generated Problem, Cause, Impact, Action text
+Implement the Daily COO Briefing generation pipeline
+Implement the AI COO Chat endpoint with streaming response and monthly limit enforcement
+Implement the Weekly COO Report generation (Growth and Agency plans only)
+Ensure every AI response carries a confidence level and never asserts certainty when confidence is Low
+Enforce the AI/deterministic boundary: all numbers must be passed in from engines, never inferred by AI
+📦  Deliverables
+lib/ai/ — OpenAI client, prompt templates for all 4 AI features
+Recommendations populated with AI-generated content via recommendation engine pipeline
+GET /api/briefings/today — daily COO briefing generated and accessible from dashboard
+POST /api/ai/chat — streaming AI chat endpoint with plan-based monthly limit enforcement
+Weekly COO Report generation for Growth/Agency plans
+Dashboard Section 2 (Today's Executive Brief) rendering live AI content
+Dashboard Section 5 (AI COO Chat) fully functional with streaming
+🔗  Dependencies
+Phase 4 complete — anomalies and recommendation stubs must exist to populate AI content
+Phase 3 complete — all deterministic engine values (scores, impacts) must be pre-computed and available as AI prompt inputs
+OpenAI API key configured, model availability confirmed
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T5-01
+AI Client
+Implement lib/ai/client.ts — OpenAI SDK wrapper with retry (3x), timeout (30s), and error handling
+P1
+T5-02
+AI Client
+Implement prompt template system: SystemPrompt + ContextBlock + InstructionBlock per feature
+P1
+T5-03
+Recs
+Implement recommendation AI pipeline — for each new anomaly: call OpenAI with pre-computed values, write Problem/Cause/Impact/Action text to recommendations table
+P1
+T5-04
+Recs
+Write and commit system prompt for recommendations — enforce: never fabricate numbers, always use provided confidence level, action must be specific
+P1
+T5-05
+Recs
+Write recommendation context builder — inject anomaly data, revenue impact, confidence, store history into prompt
+P1
+T5-06
+Briefing
+Implement daily COO briefing generation — triggered by cron, writes to reports table
+P1
+T5-07
+Briefing
+Write COO Briefing system prompt — enforce business language, use provided scores/figures, 300–500 word target
+P1
+T5-08
+Briefing
+Implement GET /api/briefings/today — return today's daily_briefing report for authenticated store
+P1
+T5-09
+Briefing
+Wire Dashboard Section 2 to GET /api/briefings/today
+P1
+T5-10
+Chat
+Implement POST /api/ai/chat — accept message, build context, stream OpenAI response
+P1
+T5-11
+Chat
+Implement monthly chat limit check: COUNT ai_conversations by storeId + billingMonth, return 429 if at limit
+P1
+T5-12
+Chat
+Implement chat context builder — inject last 10 messages + store metrics + active anomalies into prompt
+P1
+T5-13
+Chat
+Write chat system prompt — enforce confidence levels, business-only responses, action-oriented answers
+P1
+T5-14
+Chat
+Implement streaming response via Vercel Edge streaming (EventSource / ReadableStream)
+P1
+T5-15
+Chat
+Build Dashboard Section 5 chat UI: message input, streaming output, confidence badge per message
+P1
+T5-16
+Chat
+Display monthly message counter and remaining count in chat UI
+P2
+T5-17
+Weekly
+Implement weekly COO report generation — triggered by Monday cron, Growth/Agency plans only
+P1
+T5-18
+Weekly
+Write weekly report system prompt — 7-day aggregated view with trends, recommendations, risks
+P1
+T5-19
+Confidence
+Enforce in all prompts: when confidenceLevel is 'low', AI must qualify all statements and not assert certainty
+P1
+T5-20
+Testing
+Test recommendation AI output: verify Problem, Cause, Impact, Action are all populated and non-empty
+P1
+T5-21
+Testing
+Test chat limit: send 101st message on Starter plan, verify 429 response
+P1
+T5-22
+Testing
+Manual QA: verify no AI response contains a fabricated numeric value not present in the prompt context
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+AI response quality is poor on low-cost model — briefings sound generic or unhelpful
+High
+Build evaluation harness: manually rate 20+ test briefings before Phase 5 closes; iterate on system prompts until acceptable quality; document prompt versioning
+AI generates numbers not provided by deterministic engines (hallucination)
+High
+System prompts must explicitly instruct: 'Use ONLY the figures provided in this prompt. Do not calculate or estimate any numbers.' Test with adversarial inputs.
+OpenAI streaming fails intermittently in Vercel Edge environment
+Medium
+Add fallback: if stream fails, fall back to non-streaming response; add client-side reconnect logic
+Monthly token costs scale unexpectedly with merchant usage
+Medium
+Monitor per-store token usage from Phase 5 day one; set OpenAI spend alerts; enforce monthly chat limits per plan
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+Every recommendation has non-empty Problem, Cause, Impact, and Action text generated by AI
+2
+No AI response contains a numeric value that was not provided as input from a deterministic engine
+3
+Daily COO Briefing generates and writes to reports table within 60 seconds of cron trigger
+4
+Dashboard Section 2 renders today's briefing within 3 seconds of page load
+5
+AI COO Chat streams responses visible to the user within 2 seconds of message send
+6
+The 101st chat message on a Starter plan returns HTTP 429 with an informative error message
+7
+Weekly COO Report is NOT generated for Starter plan stores (plan gate verified)
+8
+All AI responses carry a confidence level indicator; Low confidence responses qualify their statements
+Phase 6: Operational Memory
+Phase 6  Operational Memory    🧠  Weeks 18–19
+🎯  Objectives
+Build the Business Timeline page with full chronological event display
+Implement Recommendation Tracking — merchant can set status to Accepted, Ignored, Completed
+Implement Recommendation Outcome recording — capture actual business impact after completion
+Build the AI COO Impact Score and display on dashboard
+Implement operational memory context injection — AI calls now include relevant historical context
+Build the Recommendations page (/dashboard/recommendations) with full lifecycle management
+📦  Deliverables
+Business Timeline page (/dashboard/timeline) with all event types rendering correctly
+Recommendation status changes wired end-to-end (UI → API → DB → timeline event)
+recommendation_outcomes records created after recommendation is marked Completed
+AI COO Impact Score displayed on dashboard (Revenue Protected, Opportunity Identified, Recs Completed, Problems Resolved)
+Operational memory context injection working in AI chat and recommendation generation
+🔗  Dependencies
+Phase 5 complete — AI layer must be live to validate that operational memory improves AI responses
+Phase 4 complete — anomaly and recommendation data must exist to populate timeline and outcomes
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T6-01
+Timeline
+Build Business Timeline page (/dashboard/timeline) — chronological event list with type icons, dates, revenue impact
+P1
+T6-02
+Timeline
+Implement GET /api/timeline — return store timeline events, paginated, newest first
+P1
+T6-03
+Timeline
+Verify all 16 timeline event types are being created by the appropriate triggers (audit from Phase 4–5)
+P1
+T6-04
+Recs
+Build Recommendations page (/dashboard/recommendations) — full list with status filter tabs
+P1
+T6-05
+Recs
+Wire PATCH /api/recommendations/:id/status — accepted / ignored / completed status updates with immediate UI refresh
+P1
+T6-06
+Recs
+Create timeline_events on recommendation status changes (accepted, ignored, completed)
+P1
+T6-07
+Outcomes
+Implement recommendation outcome recording — triggered when recommendation marked Completed
+P1
+T6-08
+Outcomes
+Outcome measurement: compare anomaly status and revenue metrics 14 days post-completion
+P1
+T6-09
+Outcomes
+Store outcome in recommendation_outcomes table with revenueImpactActual and anomalyResolved fields
+P1
+T6-10
+Impact Score
+Implement GET /api/impact — compute AI COO Impact Score (4 aggregate values) for authenticated store
+P1
+T6-11
+Impact Score
+Render AI COO Impact Score on dashboard (can extend Section 1 or separate card)
+P1
+T6-12
+Memory
+Implement operational memory context retrieval query — last 3 anomalies of same type + last 5 recommendations + 30-day timeline
+P1
+T6-13
+Memory
+Inject operational memory context into all AI prompt builders (recommendation, briefing, chat)
+P1
+T6-14
+Testing
+Integration test: marking recommendation Completed creates recommendation_outcomes record
+P1
+T6-15
+Testing
+Integration test: operational memory context changes AI prompt content for a store with 30+ days of history vs new store
+P2
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Outcome measurement produces inaccurate actual impact figures due to confounding store events
+Medium
+Mark revenueImpactActual as an estimate — be transparent with merchant; anomalyResolved boolean is more reliable signal
+Operational memory context makes AI prompts excessively long, exceeding model token limits
+Medium
+Truncate context injection to last 3 anomalies and last 5 recommendations maximum; monitor token counts
+Business Timeline becomes overwhelming for high-activity stores
+Low
+Default to last 30 events; add date filter and event type filter to Timeline UI
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+Business Timeline displays all event types in correct chronological order
+2
+Merchant can change recommendation status to Accepted, Ignored, or Completed from the Recommendations page
+3
+Status change creates corresponding timeline_events row within the same request
+4
+recommendation_outcomes record is created within 24 hours of recommendation marked Completed
+5
+AI COO Impact Score displays correct values: Revenue Protected = sum of resolved anomaly impacts; Recs Completed = count of completed recommendations
+6
+AI chat responses for a store with 30+ days of history reference store-specific context (not generic)
+7
+Context injection does not cause prompt token count to exceed model limits on any test store
+Phase 7: Notifications & Comms
+Phase 7  Notifications & Comms    📬  Weeks 20–21
+🎯  Objectives
+Implement email delivery of the Daily COO Briefing via Resend at merchant-configured time
+Implement Critical Alerts email — high-impact issues only, designed to prevent alert fatigue
+Implement Weekly COO Report email (Growth and Agency plans, every Monday)
+Implement Monthly Executive Review email (all plans, first of month)
+Implement merchant briefing delivery time configuration in settings
+All email templates must be professional, mobile-responsive, and plain-language
+📦  Deliverables
+Daily COO Briefing email delivered at merchant's configured time via Resend
+Critical Alerts firing for high-impact anomalies only (not every detected issue)
+Weekly COO Report email delivered every Monday morning to Growth and Agency plan stores
+Monthly Executive Review email delivered on the first of each month
+Settings page with daily briefing time and timezone configuration
+🔗  Dependencies
+Phase 5 complete — AI-generated COO Briefing and Weekly Report must exist as report records
+Phase 4 complete — anomaly severity classification must be working to gate Critical Alerts
+Resend API key configured and sending domain verified
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T7-01
+Email
+Implement Resend email client wrapper in lib/email/ with retry and error handling
+P1
+T7-02
+Email
+Design and build Daily COO Briefing email HTML template — mobile responsive, business professional
+P1
+T7-03
+Email
+Implement daily briefing cron: GET /api/cron/daily-briefing — find stores by briefingTime, generate report, send email
+P1
+T7-04
+Email
+Implement Critical Alert email template — single issue, clear action, minimal design
+P1
+T7-05
+Email
+Implement Critical Alert trigger: fire when anomaly severity = critical AND confidenceLevel = high or very_high
+P1
+T7-06
+Email
+Implement alert fatigue prevention: maximum 1 critical alert per anomaly type per 24-hour window per store
+P1
+T7-07
+Email
+Design and build Weekly COO Report email template
+P1
+T7-08
+Email
+Implement weekly report cron: GET /api/cron/weekly-report — Growth/Agency stores only, every Monday
+P1
+T7-09
+Email
+Design and build Monthly Executive Review email template — ROI focus, AI COO Impact Score featured
+P1
+T7-10
+Email
+Implement monthly review cron: GET /api/cron/monthly-review — all plans, first of month
+P1
+T7-11
+Settings
+Build Settings page with: briefing delivery time picker, timezone selector
+P1
+T7-12
+Settings
+Implement PATCH /api/settings — update briefingTime and briefingTimezone in stores table
+P1
+T7-13
+Testing
+Send test Daily Briefing to staging store, verify delivery, formatting, and data accuracy
+P1
+T7-14
+Testing
+Verify Critical Alert does NOT fire for Low confidence anomalies
+P1
+T7-15
+Testing
+Verify Weekly COO Report email is NOT sent to Starter plan stores
+P1
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Resend emails land in spam for certain email providers
+Medium
+Set up proper SPF, DKIM, DMARC on sending domain; use a professional From address; test deliverability with mail-tester.com before launch
+Alert fatigue from too many Critical Alerts on volatile stores
+High
+Enforce: critical severity + high/very_high confidence gate; 24-hour dedup window per anomaly type; QA on stores with high anomaly frequency
+Daily briefing cron fan-out exceeds Vercel function timeout for large merchant base
+Medium
+Process stores in batches; spread delivery across the full hour rather than all at once
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+Daily COO Briefing email arrives in merchant inbox within 5 minutes of configured delivery time
+2
+Email renders correctly on desktop and mobile (tested in Gmail, Outlook, Apple Mail)
+3
+Critical Alert does NOT send for anomalies with confidence level Low or Moderate
+4
+Critical Alert does NOT send twice for the same anomaly within a 24-hour window
+5
+Weekly COO Report email is received every Monday by Growth plan test store
+6
+Weekly COO Report email is NOT received by Starter plan test store
+7
+Monthly Executive Review email is received on the first of the month by all plan types
+8
+Merchant can change briefing delivery time in settings; new time takes effect from the next day
+Phase 8: Beta Launch
+Phase 8  Beta Launch    🚀  Weeks 22–25
+🎯  Objectives
+Onboard 5–20 real beta merchants across different store sizes and revenue ranges
+Validate the end-to-end product works on real Shopify stores with real data
+Identify and resolve all P1 bugs before public launch
+Validate anomaly detection thresholds produce meaningful signal on real store data
+Validate AI briefing and recommendation quality meets the standard: merchants find it actionable
+Complete pricing, billing, and trial flow implementation
+Achieve sub-2-minute onboarding on real stores
+📦  Deliverables
+5–20 beta merchants actively using the product on real stores
+Zero P1 (launch-blocking) bugs open
+Billing and subscription plan enforcement implemented and tested
+14-day trial flow working end-to-end without credit card
+Performance baselines met: dashboard < 3s load, anomaly detection < 5min lag, onboarding < 2min
+Beta merchant feedback documented and critical UX issues resolved
+🔗  Dependencies
+Phases 0–7 complete — all product features fully implemented and functioning on staging
+Shopify billing API or Stripe billing integration ready for plan enforcement
+Beta merchant recruitment — minimum 5 stores across different revenue tiers
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T8-01
+Billing
+Implement Shopify Billing API or Stripe subscription — Starter $49, Growth $99, Agency $199 plans
+P1
+T8-02
+Billing
+Implement 14-day free trial: no credit card required at signup, prompt to upgrade at trial end
+P1
+T8-03
+Billing
+Implement plan feature gating: Weekly COO Report (Growth+), Recommendation Tracking (Growth+), 5 stores (Agency)
+P1
+T8-04
+Beta
+Onboard first 5 beta merchants — provide white-glove installation support
+P1
+T8-05
+Beta
+Monitor first 72 hours per beta store: webhook delivery, sync jobs, anomaly detection, email delivery
+P1
+T8-06
+Beta
+Collect structured feedback: onboarding experience, briefing quality, recommendation usefulness, UI clarity
+P1
+T8-07
+Performance
+Measure and optimize dashboard load time to P95 < 3 seconds on real store data
+P1
+T8-08
+Performance
+Measure and confirm anomaly detection fires within 5 minutes of hourly sync on real data
+P1
+T8-09
+Performance
+Time onboarding end-to-end on 5+ real stores — confirm < 2 minutes
+P1
+T8-10
+Quality
+Manual QA all anomaly types on real store data — validate thresholds produce meaningful signal (not false positives)
+P1
+T8-11
+Quality
+Manual QA 20+ AI briefings and recommendations — verify no hallucinated numbers, quality meets standard
+P1
+T8-12
+Bugs
+Implement structured bug triage: P1 (launch blocker) must be resolved before Phase 9; P2 target resolution within Phase 8
+P1
+T8-13
+Shopify
+Submit app for Shopify App Store review — address any compliance or security requirements from review
+P1
+T8-14
+Legal
+Privacy policy, Terms of Service, and data processing agreement drafted and published at app URL
+P1
+T8-15
+Scale
+Load test cron fan-out with simulated 100-store load — verify no timeouts or data corruption
+P2
+T8-16
+Monitoring
+Instrument error rate, sync success rate, and AI response quality metrics in production monitoring
+P2
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Shopify App Store review rejects the app and requires changes before listing
+High
+Apply for review early in Phase 8; address any issues in parallel with beta; common issues: privacy policy, data handling disclosures
+Anomaly detection produces excessive false positives on real stores
+High
+Adjust thresholds or add minimum observation windows based on beta data; this is the most critical QA gate before launch
+AI briefing quality insufficient — merchants find it generic or unhelpful
+High
+Iterate on system prompts; add more store-specific context to prompts; do not launch if merchant NPS on briefings is negative
+Billing integration has edge cases (failed payments, plan downgrades)
+Medium
+Test all billing scenarios exhaustively: trial end, upgrade, downgrade, cancellation, failed payment, reactivation
+Beta merchants don't engage enough to validate the product
+Medium
+Set clear beta engagement expectations upfront; check in weekly; offer incentives for structured feedback
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+Minimum 5 beta merchants are actively using the product on live Shopify stores
+2
+Zero P1 bugs open — all launch-blocking issues are resolved
+3
+End-to-end onboarding completes in under 2 minutes on at least 5 real stores
+4
+Dashboard loads within 3 seconds P95 on real production data
+5
+Anomaly detection fires within 5 minutes of hourly sync completing
+6
+Billing: trial starts without credit card, plan upgrade charges correctly, plan gating enforced
+7
+At least 3 beta merchants report that the Daily COO Briefing is actionable and useful
+8
+Shopify App Store review submitted and any feedback addressed
+9
+Privacy policy and Terms of Service published at app URL
+Phase 9: Public Launch
+Phase 9  Public Launch    🌐  Weeks 26–30
+🎯  Objectives
+Publish the StorePilot listing on the Shopify App Store
+Activate billing for all three pricing plans
+Ensure support, monitoring, and incident response processes are in place
+Execute launch communications and initial merchant acquisition activities
+Establish post-launch engineering cadence: weekly releases, ongoing monitoring, rapid P1 response
+Confirm all five Founder Specification success criteria are met for the first paying merchants
+📦  Deliverables
+StorePilot listing live and publicly discoverable on the Shopify App Store
+All three pricing plans (Starter $49, Growth $99, Agency $199) live with trial-to-paid conversion working
+Production monitoring dashboard active with alerts for error rate, sync failures, and AI errors
+Support process in place: ticket system, response time SLAs, escalation path
+Post-launch engineering meeting cadence established: weekly sprint, P1 hotfix process
+🔗  Dependencies
+Phase 8 complete — zero P1 bugs, Shopify App Store review approved, billing tested
+Production infrastructure reviewed and scaled appropriately for expected launch traffic
+⚙️  Engineering Tasks
+ID
+Area
+Engineering Task
+Priority
+T9-01
+Launch
+Publish StorePilot to Shopify App Store — activate listing as public
+P1
+T9-02
+Launch
+Activate billing: Starter, Growth, Agency plans live with 14-day trial
+P1
+T9-03
+Launch
+Set up production error monitoring (Sentry or equivalent) with alerts to engineering channel
+P1
+T9-04
+Launch
+Set up cron job success rate monitoring — alert if < 95% of stores synced successfully per run
+P1
+T9-05
+Launch
+Set up OpenAI API cost alerts — notify if daily spend exceeds threshold
+P1
+T9-06
+Support
+Establish merchant support channel (email or help desk)
+P1
+T9-07
+Support
+Write onboarding email sequence: welcome, Day 3 check-in, Day 7 value prompt, Day 12 trial-end upgrade
+P1
+T9-08
+Engineering
+Establish weekly engineering sprint cadence: plan Monday, ship Friday
+P1
+T9-09
+Engineering
+Define P1 hotfix process: < 4-hour response time for production-down issues
+P1
+T9-10
+Engineering
+Document known limitations and V1 exclusions for support team (from Technical PRD Section 19)
+P2
+T9-11
+Validation
+Verify the 5 Founder Specification success criteria on the first 10 paying merchants
+P1
+T9-12
+Post-Launch
+Schedule Week 4 post-launch retrospective: anomaly quality, briefing engagement, conversion rate
+P2
+T9-13
+Post-Launch
+Begin backlog grooming for post-V1 roadmap: identify highest-priority Phase 2 features from beta feedback
+P2
+⚠️  Risks
+Risk
+Impact
+Mitigation
+Unexpected traffic spike on launch day overwhelms Supabase connection pool
+High
+Pre-scale Supabase plan before launch; confirm PgBouncer pooling is active; have Supabase support contact on standby
+Critical bug discovered on launch day after real-world merchant exposure
+High
+P1 hotfix process defined and tested; team on-call for 72 hours post-launch; rollback procedure documented
+Low trial-to-paid conversion rate
+Medium
+Monitor funnel from Day 1; A/B test onboarding emails; analyze where merchants drop off; this is a post-launch optimization problem, not a launch blocker
+Shopify App Store listing doesn't generate organic installs
+Medium
+Prepare launch communications in advance; have a list of warm leads from beta outreach ready to drive initial reviews
+✅  Definition of Done
+#
+Definition of Done Criterion
+1
+StorePilot listing is publicly discoverable at apps.shopify.com/storepilot (or equivalent URL)
+2
+A merchant can install StorePilot, complete onboarding, and see their first Daily COO Briefing without engineering assistance
+3
+All three billing plans are live and a test store can successfully upgrade from trial to paid
+4
+Production monitoring is active with defined alerts for all critical systems
+5
+P1 hotfix process is documented and the on-call engineer is confirmed
+6
+The first 3 paying merchants can answer all 5 Founder Specification success criteria questions from the dashboard alone
+7
+Support channel is live and responding to merchant inquiries
+8
+Weekly engineering sprint cadence is established with a working backlog
+Appendix: Cross-Phase Engineering Standards
+A.1 The AI/Deterministic Boundary (All Phases)
+This constraint applies to every phase and every engineering task. AI calls receive pre-computed values from deterministic engines. AI never performs arithmetic. Any violation must be treated as a P1 bug regardless of the phase it is discovered in.
+Allowed (AI Layer)
+Forbidden (AI Layer)
+Generating natural-language explanations
+Calculating health scores, revenue impacts, or confidence values
+Writing recommendation text
+Computing priority scores or urgency values
+Producing COO Briefing narrative
+Estimating monetary figures not provided in prompt
+Interpreting pre-computed trend data
+Making statistical comparisons or percentage calculations
+Answering merchant questions using provided context
+Fabricating numbers when context is missing
+A.2 V1 Feature Exclusions (All Phases)
+The following items must not be built, stubbed, or scaffolded in any phase of V1 development:
+WooCommerce, Magento, BigCommerce, or any non-Shopify platform support
+Google Search Console, Meta Ads, Google Ads, Klaviyo, Zendesk, Gorgias integrations
+Landing Page AI Analysis, Theme AI Analysis, App Impact Analysis
+Autonomous Agents or Auto-Fix Actions (AI writing back to Shopify)
+Competitor Intelligence
+Multi-Platform Support
+A.3 Definition of 'Done' Standards (All Phases)
+Every API endpoint has input validation — invalid requests return 400 with descriptive error
+Every database write is wrapped in a try/catch — failures are logged with storeId and operation context
+All multi-tenant queries are scoped by storeId — no query can return data across store boundaries
+All monetary values are in the store's configured currency — no assumed USD
+All timestamps are stored in UTC (TIMESTAMPTZ) — displayed in merchant's configured timezone
+A.4 Success Criteria Verification (Phase 9)
+The product is ready for public launch when merchants can answer all five Founder Specification success criteria without manually analyzing dashboards:
+What happened?
+Answered by: Business Timeline, Issues Center, Daily COO Briefing
+Why did it happen?
+Answered by: Anomaly Causes (AI-generated), AI COO Chat
+What should I do next?
+Answered by: Priority Issues (Section 3), Recommendations, AI COO Chat
+Did previous recommendations work?
+Answered by: Recommendation Outcomes, AI COO Impact Score
+What changed over time?
+Answered by: Business Timeline, Weekly COO Report, Monthly Executive Review

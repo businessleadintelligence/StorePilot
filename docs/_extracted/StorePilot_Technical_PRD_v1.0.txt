@@ -1,0 +1,1058 @@
+STOREPILOT
+AI Operational Intelligence Platform for Shopify
+TECHNICAL PRODUCT REQUIREMENTS DOCUMENT
+Version 1.0  |  Principal Engineer Reference  |  Based on Founder Specification v1.0
+Table of Contents
+1. Document Overview
+This Technical PRD defines the complete engineering architecture for StorePilot v1.0. It is the authoritative technical reference for all engineering decisions, covering system design, data architecture, integration patterns, AI subsystem design, infrastructure, security, and operational concerns.
+All requirements are derived exclusively from the StorePilot Founder Specification v1.0. No features have been invented or extended beyond that specification.
+Document Type
+Technical Product Requirements Document
+Version
+1.0
+Source Spec
+StorePilot Founder Specification v1.0
+Platform Scope
+Shopify (exclusive, 12-month focus)
+Frontend Stack
+Next.js
+Backend Stack
+Next.js API Routes
+Database
+PostgreSQL via Supabase
+ORM
+Prisma
+Authentication
+Shopify OAuth 2.0
+Hosting
+Vercel
+Email
+Resend
+AI Provider
+OpenAI (low-cost model)
+2. System Architecture
+2.1 Architecture Overview
+StorePilot follows a serverless-first architecture hosted on Vercel, backed by a managed PostgreSQL instance on Supabase. The system is composed of four primary layers:
+Layer
+Technology
+Responsibility
+Presentation Layer
+Next.js (React)
+Dashboard UI, onboarding flow, AI chat interface
+API Layer
+Next.js API Routes
+All business logic, Shopify webhook handlers, AI orchestration
+Data Layer
+PostgreSQL + Prisma
+Persistent store data, sync state, anomalies, recommendations
+External Services
+Shopify, GA4, OpenAI, Resend
+Data sources, AI inference, transactional email
+2.2 High-Level System Diagram
+The following diagram describes the primary data and control flows between system components:
+SYSTEM FLOW
+  [Shopify Store]                [Merchant Browser]
+       |                                |
+       | Webhooks (primary)             | HTTPS
+       | GraphQL API (sync)             |
+       v                                v
+  [Vercel Edge / Next.js App]     [Next.js Frontend]
+       |                                |
+       | Prisma ORM                     | API Routes
+       v                                v
+  [Supabase PostgreSQL]       [API Routes: Business Logic]
+                                        |
+                           +------------+------------+
+                           |            |            |
+                      [OpenAI]     [GA4 API]    [Resend]
+                      AI Layer    Analytics   Email Delivery
+2.3 Deployment Topology
+Frontend & API
+Vercel — serverless functions, edge network, automatic deployments from Git
+Database
+Supabase — managed PostgreSQL, connection pooling, row-level security
+Scheduled Jobs
+Vercel Cron Jobs (configured in vercel.json)
+Webhook Ingestion
+Next.js API Route endpoints registered with Shopify
+Email Delivery
+Resend API — transactional, scheduled digests via API calls from Vercel functions
+Secret Management
+Vercel Environment Variables — never committed to source control
+3. Application Architecture
+3.1 Directory Structure
+PROJECT STRUCTURE
+storepilot/
+  app/                    # Next.js App Router pages
+    (auth)/               # Shopify OAuth routes
+    (dashboard)/          # Protected merchant dashboard
+    api/                  # API Route handlers
+      shopify/
+        webhook/          # Shopify webhook handlers
+        oauth/            # OAuth callback
+        sync/             # Manual sync triggers
+      ai/
+        chat/             # AI COO Chat endpoint
+        briefing/         # COO Briefing generation
+        recommendations/  # Recommendation engine
+      cron/               # Cron job handlers
+  components/             # React UI components
+  lib/
+    shopify/              # Shopify API client, GraphQL queries
+    ga4/                  # GA4 API client
+    ai/                   # OpenAI client, prompt templates
+    engines/              # Deterministic business logic engines
+      health-score.ts     # Store Health Score calculation
+      anomaly-detection.ts# Threshold-based anomaly detection
+      revenue-impact.ts   # Revenue At Risk / Opportunity
+      confidence.ts       # Confidence scoring
+      recommendation.ts   # Priority scoring formula
+    email/                # Resend email templates
+    db/                   # Prisma client singleton
+  prisma/
+    schema.prisma         # Database schema
+    migrations/           # Migration history
+3.2 Core Architectural Principle: AI vs. Deterministic Separation
+CRITICAL: All numerical calculations — health scores, anomaly thresholds, revenue impact figures, confidence scores, and recommendation priority scores — MUST be computed by deterministic functions in lib/engines/. The AI layer (OpenAI) receives pre-computed values and is responsible only for generating natural-language explanations and recommendations. This separation is non-negotiable.
+Subsystem
+Owner
+Examples
+Anomaly Detection
+Deterministic engine
+Revenue drop ≥15%, inventory ≤14 days
+Health Score
+Deterministic engine
+Weighted sum across 5 dimensions
+Revenue At Risk
+Deterministic engine
+Monetary impact per active anomaly
+Confidence Score
+Deterministic engine
+Signal quality based on data volume/recency
+Priority Score
+Deterministic engine
+Revenue Impact x Confidence x Urgency
+Explanation text
+AI (OpenAI)
+"Revenue is down because..."
+Recommendation text
+AI (OpenAI)
+"We recommend you..."
+COO Briefing prose
+AI (OpenAI)
+Daily executive summary narrative
+Chat responses
+AI (OpenAI)
+Answers to merchant queries
+4. Frontend Architecture
+4.1 Framework
+Framework
+Next.js (App Router)
+Language
+TypeScript
+State Management
+React Server Components + React Query (client-side data fetching)
+Styling
+Tailwind CSS
+Charts
+Recharts or similar (lightweight, SSR-compatible)
+4.2 Page Structure
+Route
+Page
+Auth Required
+Notes
+/
+Marketing / Install page
+No
+Shopify install entry point
+/auth/shopify
+OAuth initiation
+No
+Redirects to Shopify consent
+/auth/callback
+OAuth callback handler
+No
+Exchanges code for token
+/dashboard
+Main dashboard
+Yes
+5-section layout per spec
+/dashboard/issues
+Issues Center
+Yes
+Active/resolved issue list
+/dashboard/timeline
+Business Timeline
+Yes
+Chronological event log
+/dashboard/recommendations
+Recommendations
+Yes
+Full recommendation list
+/dashboard/reports
+COO Reports
+Yes
+Weekly/monthly reports
+/onboarding
+Onboarding wizard
+Yes
+Post-OAuth 7-step flow
+/settings
+Store settings
+Yes
+GA4 connect, preferences
+4.3 Dashboard Layout — 5 Sections
+The dashboard renders five sections in order, as defined by the Founder Specification:
+Section
+Component
+Data Source
+Refresh
+1 — AI COO Status Card
+HealthScoreCard
+GET /api/dashboard/status
+On page load, 15-min poll
+2 — Today's Executive Brief
+DailyBriefCard
+GET /api/briefings/today
+On page load
+3 — Priority Issues
+IssuesList
+GET /api/issues?status=active
+On page load
+4 — Revenue Opportunities
+OpportunityList
+GET /api/opportunities
+On page load
+5 — AI COO Chat
+ChatPanel
+POST /api/ai/chat (streaming)
+Per message
+4.4 Chat Message Limit Enforcement
+Monthly AI COO Chat message limits are enforced client-side via counter display and server-side via API route validation. Limits by plan: Starter = 100, Growth = 500, Agency = 1,500. Attempts beyond the limit return HTTP 429 with a plan upgrade prompt.
+5. Backend Architecture
+5.1 API Route Design
+All backend logic is implemented as Next.js API Routes. Routes are organized by domain. All routes except OAuth callbacks and Shopify webhooks require session authentication.
+Route Group
+Path Pattern
+Method(s)
+Description
+Auth
+/api/auth/*
+GET, POST
+Session management, logout
+Shopify OAuth
+/api/shopify/oauth/*
+GET
+OAuth initiation and callback
+Webhooks
+/api/shopify/webhook/*
+POST
+Shopify event ingestion
+Sync
+/api/sync/*
+POST
+Manual and scheduled sync triggers
+Dashboard
+/api/dashboard/*
+GET
+Aggregated dashboard data
+Issues
+/api/issues/*
+GET, PATCH
+Issue retrieval and status update
+Recommendations
+/api/recommendations/*
+GET, PATCH
+Recommendation retrieval and status
+Opportunities
+/api/opportunities
+GET
+Revenue opportunity list
+AI Chat
+/api/ai/chat
+POST
+Streaming AI chat response
+Briefings
+/api/briefings/*
+GET
+Daily and weekly COO reports
+Timeline
+/api/timeline
+GET
+Business Timeline events
+Impact
+/api/impact
+GET
+AI COO Impact Score
+Cron
+/api/cron/*
+GET
+Vercel Cron Job handlers (secured)
+5.2 Business Logic Engine Layer
+All engines in lib/engines/ are pure TypeScript functions with no side effects. They receive structured data and return computed results. They never call external APIs or the database directly.
+Engine
+Input
+Output
+health-score.ts
+MetricsSnapshot (revenue, conversion, inventory, refund, traffic dimensions)
+HealthScore { total: number, breakdown: DimensionScores }
+anomaly-detection.ts
+Current vs baseline MetricsSnapshot, thresholds config
+AnomalyResult[] — list of triggered anomalies with severity
+revenue-impact.ts
+AnomalyResult[], store baseline revenue
+RevenueAtRisk: number, RevenueOpportunity: number (monthly $)
+confidence.ts
+DataPoint count, recency days, signal consistency
+ConfidenceLevel: 'very_high' | 'high' | 'moderate' | 'low', score: number
+recommendation.ts
+AnomalyResult, RevenueImpact, ConfidenceLevel, urgency
+PriorityScore: number (Revenue x Confidence x Urgency)
+6. Authentication & Shopify OAuth Flow
+6.1 Authentication Strategy
+Auth Method
+Shopify OAuth 2.0
+Session Storage
+Encrypted HTTP-only cookie (server-side session)
+Token Storage
+Shopify access token stored encrypted in PostgreSQL (Stores table)
+Session Library
+iron-session or next-auth with custom Shopify provider
+HMAC Validation
+All incoming Shopify webhooks validated via HMAC-SHA256
+6.2 Shopify OAuth Flow
+SHOPIFY OAUTH FLOW
+1. Merchant clicks Install from Shopify App Store
+   GET /api/shopify/oauth/initiate?shop={shop}.myshopify.com
+2. Server validates shop param, builds OAuth URL:
+   https://{shop}.myshopify.com/admin/oauth/authorize
+     ?client_id={SHOPIFY_API_KEY}
+     &scope={REQUIRED_SCOPES}
+     &redirect_uri={APP_URL}/api/shopify/oauth/callback
+     &state={nonce}  // CSRF token stored in session
+3. Merchant approves on Shopify consent screen
+4. Shopify redirects to:
+   GET /api/shopify/oauth/callback?shop=...&code=...&state=...&hmac=...
+5. Server validates:
+   a. state matches stored nonce (CSRF check)
+   b. HMAC signature valid
+   c. shop param matches expected format
+6. Server exchanges code for permanent access token:
+   POST https://{shop}.myshopify.com/admin/oauth/access_token
+     { client_id, client_secret, code }
+7. Token stored encrypted in Stores.accessToken
+8. Server creates Store record and User record
+9. Background job triggered: historical data import (90 days)
+10. Merchant redirected to /onboarding
+6.3 Required OAuth Scopes
+Scope
+Purpose
+read_orders
+Order history, revenue data, conversion metrics
+read_products
+Product catalog, variant data
+read_inventory
+Inventory levels per location
+read_customers
+Customer metrics (daily sync)
+read_analytics
+Basic analytics data (if available)
+write_script_tags
+Optional: future in-store tracking (roadmap)
+6.4 Session Lifecycle
+Sessions are validated on every protected API route and page. Token refresh is handled automatically. If a Shopify token is revoked (uninstall webhook), the store record is marked inactive and all sessions for that store are invalidated.
+7. Shopify GraphQL Integration
+7.1 API Client
+API Version
+Use latest stable Shopify Admin GraphQL API version, pinned in config
+Client Library
+@shopify/shopify-api (official Node.js library)
+Rate Limiting
+Respect Shopify's cost-based throttling (query cost points); implement exponential backoff
+Retry Strategy
+3 retries with exponential backoff on 429 / 5xx responses
+Pagination
+Cursor-based pagination for all list queries using edges/pageInfo pattern
+7.2 Core GraphQL Queries
+SHOPIFY GRAPHQL QUERIES
+// Revenue & Orders — hourly sync
+query GetOrders($cursor: String, $after: String) {
+  orders(first: 250, after: $cursor, query: $after) {
+    edges { node {
+      id createdAt totalPriceSet { shopMoney { amount } }
+      displayFinancialStatus cancelledAt
+    } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+// Inventory — hourly sync
+query GetInventoryLevels {
+  inventoryItems(first: 250) {
+    edges { node {
+      id inventoryLevels(first: 10) {
+        edges { node { available location { id } } }
+      }
+    } }
+  }
+}
+// Products — 6-hour sync
+query GetProducts($cursor: String) {
+  products(first: 250, after: $cursor) {
+    edges { node {
+      id title handle status
+      variants(first: 50) {
+        edges { node { id sku price inventoryQuantity } }
+      }
+    } }
+    pageInfo { hasNextPage endCursor }
+  }
+}
+7.3 Shopify Webhooks
+Webhooks are the primary real-time data ingestion mechanism. All webhook handlers validate the HMAC-SHA256 signature before processing.
+Webhook Topic
+Handler Path
+Action
+orders/create
+/api/shopify/webhook/orders
+Upsert order, trigger revenue recalc
+orders/updated
+/api/shopify/webhook/orders
+Update order status, recalc metrics
+orders/cancelled
+/api/shopify/webhook/orders
+Mark cancelled, recalc revenue
+refunds/create
+/api/shopify/webhook/refunds
+Record refund, trigger refund spike check
+inventory_levels/update
+/api/shopify/webhook/inventory
+Update inventory, trigger risk check
+products/create
+/api/shopify/webhook/products
+Add product to catalog
+products/update
+/api/shopify/webhook/products
+Update product data
+app/uninstalled
+/api/shopify/webhook/uninstall
+Deactivate store, invalidate sessions
+7.4 Webhook Validation
+WEBHOOK HMAC VALIDATION
+// Every webhook handler MUST call this before processing
+function validateShopifyWebhook(rawBody: Buffer, hmacHeader: string): boolean {
+  const hash = crypto
+    .createHmac('sha256', process.env.SHOPIFY_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest('base64');
+  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(hmacHeader));
+}
+// Return 401 immediately if validation fails. Never process unauthenticated payloads.
+8. Google Analytics 4 Integration
+8.1 Integration Overview
+GA4 is an optional integration. When connected, it unlocks two additional anomaly detectors (Traffic Drop, Checkout Drop) and the Traffic Health dimension in the Store Health Score. All GA4-dependent features must gracefully degrade when GA4 is not connected.
+API
+Google Analytics Data API v1 (GA4)
+Auth Method
+OAuth 2.0 — merchant grants read-only access to their GA4 property
+Sync Frequency
+Every 6 hours
+Data Stored
+Daily session counts, traffic sources, checkout funnel metrics
+Graceful Degrade
+Traffic Health dimension = 0 weight, Traffic/Checkout anomalies disabled if GA4 disconnected
+8.2 GA4 OAuth Flow
+GA4 OAUTH FLOW
+1. Merchant clicks 'Connect Google Analytics' in onboarding or settings
+   GET /api/ga4/oauth/initiate
+2. Redirect to Google OAuth consent:
+   https://accounts.google.com/o/oauth2/v2/auth
+     ?scope=https://www.googleapis.com/auth/analytics.readonly
+     &access_type=offline
+     &response_type=code
+     &redirect_uri={APP_URL}/api/ga4/oauth/callback
+3. Callback: exchange code for access_token + refresh_token
+   Store refresh_token encrypted in Stores.ga4RefreshToken
+4. Merchant selects GA4 property to connect
+   Store property ID in Stores.ga4PropertyId
+5. Trigger initial GA4 historical import (90 days)
+8.3 GA4 Data Queries
+Data Type
+GA4 Metric/Dimension
+Anomaly It Enables
+Session count
+sessions (date dimension)
+Traffic Drop (≥20% decline)
+Checkout initiation rate
+checkouts (ecommerce)
+Checkout Drop
+Traffic by source
+sessionSource, sessions
+Source-specific traffic context
+8.4 Feature Gating by GA4 Connection Status
+Feature
+GA4 Not Connected
+GA4 Connected
+Store Health Score
+Traffic Health = excluded (score recalculated on 90% weight total)
+Traffic Health = 10% weight
+Traffic Drop anomaly
+Disabled — not surfaced
+Enabled — triggers at ≥20% decline
+Checkout Drop anomaly
+Disabled — not surfaced
+Enabled — triggers on significant decline
+AI COO Chat context
+No traffic data available
+Traffic context included in AI prompts
+9. AI Architecture
+9.1 AI Provider
+Provider
+OpenAI
+Model
+Low-cost model (e.g. gpt-4o-mini or equivalent) — selected for cost efficiency at scale
+Integration
+OpenAI Node.js SDK
+Streaming
+Enabled for AI COO Chat — streamed via Vercel Edge streaming response
+Max Tokens
+1,000 tokens for briefings/recommendations; 500 for chat responses (tunable)
+Temperature
+0.3 — low temperature for consistent, business-appropriate responses
+9.2 AI Responsibility Boundary
+The AI layer NEVER calculates. It receives structured, pre-computed data from deterministic engines and its ONLY job is to generate natural-language text. Any AI response that contains a number must have received that number as input from a deterministic engine, never inferred it.
+9.3 Prompt Architecture
+Each AI feature uses a structured prompt template. All prompts follow the same three-layer pattern:
+PROMPT TEMPLATE STRUCTURE
+SYSTEM PROMPT (constant per feature):
+  - Defines AI role and constraints
+  - Enforces business language requirements
+  - Specifies confidence level handling rules
+  - Instructs AI never to fabricate numbers
+CONTEXT BLOCK (dynamic — injected per request):
+  - Pre-computed metrics (health score, revenue at risk, etc.)
+  - Active anomalies with computed severity
+  - Relevant operational history from memory system
+  - Confidence level for this recommendation
+INSTRUCTION BLOCK (dynamic — specifies output format):
+  - Problem: [describe detected issue]
+  - Likely Cause: [explain why this is happening]
+  - Revenue Impact: [use the provided figure: {revenue_impact}]
+  - Recommended Action: [specific, actionable step]
+  - Confidence: [use the provided level: {confidence_level}]
+9.4 AI Feature Implementations
+Feature
+Trigger
+Input Data
+Output
+Daily COO Briefing
+Scheduled cron (daily)
+Full metrics snapshot, active anomalies, top recommendations
+Executive summary prose (300–500 words)
+Weekly COO Report
+Scheduled cron (Monday)
+7-day aggregated metrics, trend analysis, outcome data
+Structured report with sections
+Recommendation Text
+On anomaly detection
+Anomaly data, revenue impact, confidence, store history
+Problem/Cause/Action text blocks
+AI COO Chat
+User message
+Chat history, store context, current metrics, timeline
+Streamed conversational response
+Anomaly Explanation
+On anomaly creation
+Anomaly type, metrics delta, store operational history
+Plain-language cause explanation
+9.5 Operational Memory Integration
+The Operational Memory System feeds historical context into AI prompts. Before any AI call, the system retrieves relevant history from the database:
+Last 3 similar anomalies and their resolutions
+Last 5 recommendations for this anomaly type and their outcomes
+Key business events from Business Timeline (last 30 days)
+Previous AI COO Chat context (last 10 messages for chat endpoint)
+This context is injected into the CONTEXT BLOCK of each prompt to enable progressively more relevant explanations as the store's history grows.
+9.6 Chat Message Limit Enforcement
+CHAT LIMIT ENFORCEMENT
+// API Route: POST /api/ai/chat
+async function handler(req, res) {
+  const store = await getAuthenticatedStore(req);
+  const plan = store.subscriptionPlan; // 'starter' | 'growth' | 'agency'
+  const limit = { starter: 100, growth: 500, agency: 1500 }[plan];
+  const currentMonth = getCurrentBillingMonth();
+  const used = await db.aiConversations.count({
+    where: { storeId: store.id, billingMonth: currentMonth }
+  });
+  if (used >= limit) {
+    return res.status(429).json({ error: 'monthly_limit_reached', used, limit });
+  }
+  // proceed with AI call...
+}
+10. Data Sync Strategy
+10.1 Sync Architecture Overview
+Data sync uses a dual-path strategy: webhooks for real-time event ingestion, and scheduled jobs as a reliability fallback. The combination ensures no data gaps even if individual webhooks are missed.
+Data Type
+Primary Mechanism
+Fallback
+Frequency
+Revenue / Orders
+Shopify webhook (orders/create, updated, cancelled)
+Scheduled cron sync
+Hourly (cron), real-time (webhook)
+Inventory
+Shopify webhook (inventory_levels/update)
+Scheduled cron sync
+Hourly (cron), real-time (webhook)
+Refunds
+Shopify webhook (refunds/create)
+Scheduled cron sync
+Hourly (cron), real-time (webhook)
+Products
+Shopify webhook (products/create, update)
+Scheduled cron sync
+Every 6 hours (cron)
+GA4 Traffic
+Scheduled cron sync (no webhook available)
+None
+Every 6 hours
+Customer Metrics
+Scheduled cron sync
+None
+Daily
+10.2 Historical Import (Onboarding)
+HISTORICAL IMPORT FLOW
+Trigger: POST /api/sync/historical (called after OAuth completion)
+Process:
+  1. Fetch orders from 90 days ago to today (paginated GraphQL)
+  2. Fetch product catalog (paginated GraphQL)
+  3. Fetch inventory levels
+  4. Fetch refunds
+  5. Fetch GA4 historical data (if connected)
+  6. Populate StoreMetricsDaily, ProductMetricsDaily, InventoryDaily tables
+  7. Run initial anomaly detection pass
+  8. Generate first COO Report
+  9. Emit 'onboarding_complete' timeline event
+Execution: Background job (Vercel background function or immediate cron trigger)
+Target: Complete before merchant finishes onboarding UI (under 2 minutes total)
+10.3 Sync State Tracking
+Each store maintains a SyncState record tracking:
+lastOrdersSyncAt — timestamp of last successful orders sync
+lastInventorySyncAt — timestamp of last successful inventory sync
+lastRefundsSyncAt — timestamp of last successful refunds sync
+lastProductsSyncAt — timestamp of last successful products sync
+lastGa4SyncAt — timestamp of last successful GA4 sync
+historicalImportComplete — boolean flag
+Scheduled jobs use these timestamps to sync only the delta since the last successful run, avoiding redundant full re-fetches.
+11. Scheduled Jobs
+11.1 Cron Job Overview
+All scheduled jobs are implemented as Vercel Cron Jobs, configured in vercel.json. Each cron endpoint is secured with a secret header to prevent unauthorized invocation.
+Cron endpoints MUST validate the header: Authorization: Bearer {CRON_SECRET} and return 401 if invalid. Never execute job logic on unauthorized requests.
+11.2 Job Schedule
+Job Name
+Cron Expression
+Path
+Action
+Hourly Sync
+0 * * * *
+/api/cron/sync-hourly
+Sync revenue, inventory, refunds for all active stores
+6-Hour Sync
+0 */6 * * *
+/api/cron/sync-6h
+Sync products and GA4 data
+Daily Sync
+0 6 * * *
+/api/cron/sync-daily
+Sync customer metrics
+Anomaly Detection
+30 * * * *
+/api/cron/detect-anomalies
+Run anomaly detection engine across all stores post-hourly sync
+Daily COO Briefing
+0 * * * *
+/api/cron/daily-briefing
+Generate and send briefing to stores whose delivery time matches current hour
+Weekly COO Report
+0 7 * * 1
+/api/cron/weekly-report
+Generate and send weekly report (Monday 7am UTC)
+Monthly Review
+0 8 1 * *
+/api/cron/monthly-review
+Generate monthly executive review
+Health Score Recalc
+45 * * * *
+/api/cron/health-score
+Recalculate health scores post-anomaly detection
+11.3 Job Execution Pattern
+CRON JOB PATTERN
+// Pattern for all cron handlers
+export async function GET(req: Request) {
+  // 1. Validate cron secret
+  if (req.headers.get('Authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  // 2. Fetch all active stores
+  const stores = await db.stores.findMany({ where: { active: true } });
+  // 3. Process each store with error isolation
+  const results = await Promise.allSettled(
+    stores.map(store => processStore(store).catch(err => {
+      logger.error({ storeId: store.id, err }, 'Cron job failed for store');
+      // Never throw — one store failure must not block others
+    }))
+  );
+  return Response.json({ processed: stores.length, results });
+}
+12. Database Schema
+12.1 Core Entities
+Stores
+One record per connected Shopify store — holds OAuth token, plan, sync state, settings
+Users
+Merchant user accounts linked to stores
+Products
+Product catalog synced from Shopify
+StoreMetricsDaily
+Daily aggregate metrics snapshot: revenue, orders, conversion rate, refund rate
+ProductMetricsDaily
+Daily per-product performance metrics
+InventoryDaily
+Daily inventory snapshot per product/variant
+TrafficDaily
+Daily GA4 traffic metrics (null if GA4 not connected)
+Anomalies
+Detected anomalies with type, severity, triggered_at, resolved_at
+AnomalyCauses
+AI-generated cause explanations linked to anomalies
+Recommendations
+Full recommendation records with status tracking
+RecommendationOutcomes
+Outcome data after recommendation is marked completed
+TimelineEvents
+Chronological business event log
+Reports
+Generated daily briefings, weekly reports, monthly reviews
+AiConversations
+AI COO Chat message history with monthly counter
+12.2 Key Schema Design Decisions
+Decision
+Rationale
+StoreMetricsDaily (not hourly)
+Hourly sync populates raw events; daily aggregation is the primary query target for trend analysis
+Soft-delete on anomalies
+Anomalies are resolved, not deleted — required for Business Timeline and operational memory
+RecommendationOutcomes separate table
+Decouples recommendation creation from outcome tracking; enables future ML training
+AiConversations monthly counter column
+Fast plan limit checks without full COUNT(*) queries
+TrafficDaily nullable
+GA4 is optional; null rows indicate no GA4 connection, not missing data
+Encrypted accessToken column
+Shopify access tokens encrypted at column level using application-level encryption
+12.3 Indexes Required for Performance
+DATABASE INDEXES
+-- Frequently queried by storeId + date range
+CREATE INDEX idx_metrics_store_date ON StoreMetricsDaily(storeId, date DESC);
+CREATE INDEX idx_inventory_store_date ON InventoryDaily(storeId, date DESC);
+CREATE INDEX idx_traffic_store_date ON TrafficDaily(storeId, date DESC);
+-- Anomaly queries
+CREATE INDEX idx_anomalies_store_status ON Anomalies(storeId, status);
+CREATE INDEX idx_anomalies_store_type ON Anomalies(storeId, type, triggeredAt DESC);
+-- Recommendation queries
+CREATE INDEX idx_recs_store_status ON Recommendations(storeId, status);
+CREATE INDEX idx_recs_priority ON Recommendations(storeId, priorityScore DESC);
+-- Timeline queries
+CREATE INDEX idx_timeline_store_at ON TimelineEvents(storeId, occurredAt DESC);
+-- Chat limit enforcement
+CREATE INDEX idx_chat_store_month ON AiConversations(storeId, billingMonth);
+13. Error Handling Strategy
+13.1 Error Handling Principles
+Store-level isolation: A failure for one merchant must never affect other merchants
+Graceful degradation: Partial data is always better than no data
+Retry with backoff: All external API calls implement exponential backoff with jitter
+Structured logging: All errors logged with storeId, operation, and error context
+User-facing errors: Never expose internal error details; show actionable merchant messages
+13.2 Error Categories & Responses
+Error Category
+Example
+Handling Strategy
+Shopify API Rate Limit (429)
+Too many GraphQL requests
+Exponential backoff: 1s, 2s, 4s, 8s — max 3 retries. Log and skip store on final failure.
+Shopify API Unavailable (5xx)
+Shopify maintenance window
+Retry 3x with backoff. Mark sync as failed; next scheduled run will catch up via delta sync.
+Webhook HMAC Failure
+Forged or malformed webhook
+Return 401 immediately. Log source IP. Never process payload.
+OpenAI API Error
+Rate limit, model unavailable
+Return cached last briefing if available. Log and alert. Never show blank briefing.
+GA4 Token Expired
+refresh_token invalid
+Mark GA4 as disconnected for store. Disable GA4-dependent features. Notify merchant via email.
+Database Connection Error
+Supabase connection pool exhausted
+Retry 2x. Return 503 to client. Vercel will retry scheduled jobs.
+Cron Job Partial Failure
+3 of 50 stores fail during hourly sync
+Log per-store failures. Continue processing remaining stores. Success metric: % stores synced.
+Invalid Merchant Session
+Expired or revoked session token
+Redirect to /auth/shopify for re-authentication.
+13.3 Webhook Idempotency
+All webhook handlers must be idempotent. Shopify may deliver the same webhook event multiple times. Use the webhook id field as an idempotency key:
+WEBHOOK IDEMPOTENCY PATTERN
+async function handleOrderCreate(payload: ShopifyOrderPayload) {
+  const existing = await db.orders.findUnique({
+    where: { shopifyId: payload.id }
+  });
+  if (existing) {
+    return; // Already processed — skip silently
+  }
+  // Process new order...
+}
+14. Security Requirements
+14.1 Authentication & Authorization
+Requirement
+Implementation
+All API routes protected
+Middleware validates session on every request except webhook and OAuth endpoints
+Shopify access tokens encrypted
+Column-level AES-256 encryption; keys stored in Vercel env vars, never in DB
+GA4 refresh tokens encrypted
+Same AES-256 column-level encryption as Shopify tokens
+Webhook HMAC validation
+crypto.timingSafeEqual() on every inbound Shopify webhook — reject on mismatch
+Cron endpoints secured
+Authorization: Bearer {CRON_SECRET} header validation — return 401 on failure
+Multi-tenant data isolation
+All DB queries scoped by storeId from session — no cross-store data access possible
+CSRF protection
+State parameter (nonce) validated during Shopify OAuth callback
+14.2 Data Security
+Requirement
+Implementation
+Data in transit
+TLS 1.2+ enforced by Vercel on all connections
+Data at rest
+Supabase PostgreSQL encrypted at rest (AES-256)
+Sensitive columns
+accessToken, ga4RefreshToken encrypted at application level before DB write
+Environment variables
+All secrets in Vercel environment variables — never in source code or version control
+Row-level security
+Supabase RLS policies ensure direct DB access (if ever enabled) is scoped by store
+API key rotation
+Design supports key rotation without downtime (re-encrypt on new key, fallback to old)
+14.3 Compliance Considerations
+GDPR: Merchant data deletion capability required — store deactivation must cascade-delete or anonymize PII
+Shopify Partner Agreement: All data use must comply with Shopify API Terms of Service
+Data minimization: Only fetch and store data required to operate the product — no speculative data collection
+Audit log: Critical operations (store connect, disconnect, token refresh) logged with timestamp and actor
+15. Scalability Requirements
+15.1 Infrastructure Scaling
+Component
+Scaling Mechanism
+Constraint
+Next.js API Routes
+Vercel serverless auto-scaling — no config required
+Vercel function execution timeout (max 60s for standard, 300s for Pro)
+Database
+Supabase connection pooling (PgBouncer) + read replicas if needed
+Supabase plan limits — upgrade as merchant count grows
+Cron Jobs
+Single invocation per schedule — fan out to stores in parallel using Promise.allSettled
+Vercel Cron limits on free/pro plans
+Shopify API
+Rate limiting handled per-store with token bucket pattern
+Shopify: 1,000 cost units/minute per store
+OpenAI API
+Per-store rate limiting; queue heavy loads
+OpenAI RPM and TPM limits per API key
+Resend Email
+Batch send for cron-triggered emails
+Resend plan sending limits
+15.2 Cron Job Scaling Design
+As the merchant base grows, the hourly cron job must process all active stores within 60 minutes. Architecture must support this growth:
+Phase 1 (< 500 stores): Single cron invocation, sequential or parallel Promise.allSettled
+Phase 2 (500–2,000 stores): Fan-out pattern — cron invokes N parallel worker functions
+Phase 3 (2,000+ stores): Queue-based processing (Vercel Queue or external queue) — outside V1 scope
+15.3 Database Query Performance Targets
+Query
+Target P95 Latency
+Dashboard status load (health score, revenue at risk)
+< 200ms
+Priority issues list (top 10)
+< 150ms
+Business Timeline (last 30 events)
+< 100ms
+Anomaly detection engine run (per store)
+< 500ms
+Full cron sync cycle (per store)
+< 30s
+16. Deployment Architecture
+16.1 Environments
+Environment
+Purpose
+Branch
+Database
+Development
+Local development
+feature/* branches
+Local PostgreSQL or Supabase dev project
+Staging
+Pre-production testing
+main branch
+Supabase staging project (separate from prod)
+Production
+Live merchant-facing application
+release tags
+Supabase production project
+16.2 CI/CD Pipeline
+CI/CD PIPELINE
+Push to feature branch:
+  -> GitHub Actions: lint, type-check, unit tests
+  -> Preview deployment on Vercel (auto)
+Merge to main:
+  -> GitHub Actions: full test suite
+  -> Prisma migration check
+  -> Deploy to Vercel staging
+  -> Run E2E smoke tests against staging
+Release tag (vX.X.X):
+  -> Deploy to Vercel production
+  -> Run Prisma migrations against production DB
+  -> Smoke test production
+16.3 Vercel Configuration
+VERCEL.JSON
+// vercel.json
+{
+  "crons": [
+    { "path": "/api/cron/sync-hourly",      "schedule": "0 * * * *" },
+    { "path": "/api/cron/sync-6h",          "schedule": "0 */6 * * *" },
+    { "path": "/api/cron/sync-daily",        "schedule": "0 6 * * *" },
+    { "path": "/api/cron/detect-anomalies",  "schedule": "30 * * * *" },
+    { "path": "/api/cron/daily-briefing",    "schedule": "0 * * * *" },
+    { "path": "/api/cron/weekly-report",     "schedule": "0 7 * * 1" },
+    { "path": "/api/cron/monthly-review",    "schedule": "0 8 1 * *" },
+    { "path": "/api/cron/health-score",      "schedule": "45 * * * *" }
+  ]
+}
+17. Environment Variables
+CRITICAL: No secret value should ever be committed to source control. All variables below are stored in Vercel Environment Variables and injected at build/runtime. Local development uses .env.local (gitignored).
+Variable
+Description
+Required
+SHOPIFY_API_KEY
+Shopify Partner app client ID
+Yes
+SHOPIFY_API_SECRET
+Shopify Partner app client secret
+Yes
+SHOPIFY_WEBHOOK_SECRET
+HMAC secret for webhook signature validation
+Yes
+SHOPIFY_SCOPES
+Comma-separated OAuth scope string
+Yes
+NEXT_PUBLIC_APP_URL
+Public app URL (e.g. https://app.storepilot.com)
+Yes
+DATABASE_URL
+Supabase PostgreSQL connection string (with pooling)
+Yes
+DIRECT_URL
+Supabase direct connection (for Prisma migrations)
+Yes
+ENCRYPTION_KEY
+32-byte hex key for AES-256 column-level encryption
+Yes
+SESSION_SECRET
+Secret for iron-session / JWT signing
+Yes
+OPENAI_API_KEY
+OpenAI API key
+Yes
+OPENAI_MODEL
+Model identifier (e.g. gpt-4o-mini)
+Yes
+RESEND_API_KEY
+Resend transactional email API key
+Yes
+EMAIL_FROM
+Sender address (e.g. coo@storepilot.com)
+Yes
+GOOGLE_CLIENT_ID
+Google OAuth client ID for GA4 integration
+GA4 only
+GOOGLE_CLIENT_SECRET
+Google OAuth client secret for GA4 integration
+GA4 only
+CRON_SECRET
+Bearer token for securing cron job endpoints
+Yes
+NEXT_PUBLIC_POSTHOG_KEY
+Product analytics key (optional but recommended)
+Optional
+18. Technical Risks
+Risk
+Severity
+Probability
+Mitigation
+Shopify API rate limits block timely sync for stores with large order volumes
+High
+Medium
+Implement cost-aware GraphQL query batching; use cursor pagination efficiently; prioritize webhook-first sync; schedule cron jobs with jitter to avoid thundering herd
+Vercel function timeout (60s) exceeded during historical import for large stores (90 days, 10k+ orders)
+High
+Medium
+Break historical import into chunked background jobs triggered sequentially; implement import progress tracking; allow onboarding UI to proceed while import runs in background
+Supabase connection pool exhaustion under peak cron job load (all stores syncing simultaneously)
+High
+Low
+Add pgbouncer connection pooling; stagger cron processing with per-store delays; upgrade Supabase plan proactively as merchant count grows
+OpenAI model output quality insufficient for business-grade COO briefings on low-cost model
+Medium
+Medium
+Invest heavily in prompt engineering before launch; A/B test model vs gpt-4o for briefing quality; build evaluation harness to assess output quality on test stores
+GA4 API changes or quota limits disrupt traffic sync
+Medium
+Low
+GA4 is optional — degrade gracefully; monitor GA4 API deprecation notices; abstract GA4 client behind interface for easy swap
+Webhook delivery failures create data gaps (Shopify retries 19 times over 48h, then stops)
+Medium
+Low
+Scheduled hourly cron sync is explicit fallback; reconciliation job compares expected vs received orders for high-revenue stores
+Deterministic engine produces incorrect monetary figures (e.g. off-by-one in revenue baseline)
+High
+Low
+Comprehensive unit test coverage on all engine functions; test with synthetic datasets covering edge cases; merchant-reported impact scores compared to Shopify analytics in QA
+Cron job fan-out fails silently (store processing error swallowed)
+Medium
+Medium
+Use Promise.allSettled — never Promise.all; log per-store results with structured logging; track % stores successfully synced per cron run; alert on >5% failure rate
+19. V1 Technical Exclusions
+The following technical capabilities are explicitly excluded from V1. They must not be designed into, stubbed out in, or partially implemented in the V1 codebase.
+No V1 code should contain placeholder implementations, feature flags, or partial scaffolding for any item on this list. Including them increases technical debt and scope creep risk.
+Excluded Capability
+Notes
+Message queue system (SQS, BullMQ, etc.)
+Vercel Cron + Promise.allSettled is sufficient for V1 store volumes
+WooCommerce / BigCommerce / Magento adapters
+Shopify-only architecture; no multi-platform abstraction layer
+Google Search Console integration
+Roadmap — no API client, no DB schema columns
+Meta Ads / Google Ads integration
+Roadmap — no API client, no ad spend data models
+Klaviyo / Zendesk / Gorgias integration
+Roadmap — no API clients
+Landing Page / Theme / App Impact Analysis
+Would require DOM or app event instrumentation — out of scope
+Autonomous Agents / Auto-Fix Actions
+AI must not write back to Shopify in V1
+Competitor Intelligence
+No external market data sources in V1
+Real-time WebSocket connections
+Dashboard polling is sufficient for V1 refresh requirements
+Multi-region database replication
+Single Supabase region sufficient for V1 scale
+Custom ML models
+OpenAI API only; no model training infrastructure

@@ -1,0 +1,829 @@
+STOREPILOT
+Billing Specification
+Version 1.0  ·  Shopify Managed Billing  ·  Confidential
+Document
+StorePilot Billing Specification v1.0
+Platform
+Shopify (exclusive)
+Billing Model
+Shopify Managed Billing via App Subscriptions API
+Plans
+Starter ($49/mo) · Growth ($99/mo) · Agency ($199/mo)
+Trial
+14-Day Free Trial, no credit card required
+Source Truth
+StorePilot Founder Specification v1.0
+Status
+DRAFT – For Engineering & Product Review
+SECTION 1  ·  Billing Overview & Principles
+1. Billing Overview & Principles
+1.1  Purpose
+This specification defines the complete billing architecture for StorePilot. It covers subscription lifecycle management, trial mechanics, plan transitions, failure handling, database schema, webhook integration, API endpoints, acceptance criteria, edge cases, security, and future scalability. All billing is exclusively managed through Shopify's App Subscriptions API. StorePilot must not implement independent payment processing.
+1.2  Guiding Principles
+Shopify is the single source of billing truth. StorePilot's database reflects Shopify's billing state; it never overrides it.
+No money is collected outside Shopify. StorePilot never handles card details or initiates charges directly.
+Merchant experience must be frictionless. Trial activation, plan changes, and cancellations complete in under 60 seconds.
+Billing state changes are atomic. Partial state writes must never leave the application in an inconsistent billing state.
+Revenue is protected through automated retry logic and transparent merchant communication on payment failure.
+The 14-day free trial requires no credit card. Merchants evaluate StorePilot risk-free.
+1.3  Shopify Managed Billing — Architecture Summary
+StorePilot uses Shopify's RecurringApplicationCharge (REST) and AppSubscription (GraphQL Admin API) primitives. All pricing, trial logic, and charge collection are delegated to Shopify. StorePilot stores billing metadata in its own PostgreSQL database (hosted on Supabase) to drive feature entitlements, usage enforcement, and reporting.
+CRITICAL
+StorePilot must never implement its own payment gateway, store raw card data, or bypass Shopify Billing. Violations create legal liability and violate Shopify Partner Program terms.
+SECTION 2  ·  Plan Definitions & Feature Entitlements
+2. Plan Definitions & Feature Entitlements
+2.1  Pricing Plans
+Feature
+Starter
+Growth
+Agency
+Monthly Price
+$49/month
+$99/month
+$199/month
+Stores
+1
+1
+5
+AI Chat Messages/Month
+100
+500
+1,500
+Historical Data
+90 Days
+1 Year
+Unlimited
+Daily COO Briefing
+Yes
+Yes
+Yes
+Revenue Leak Detection
+Yes
+Yes
+Yes
+Inventory Monitoring
+Yes
+Yes
+Yes
+Conversion Monitoring
+Yes
+Yes
+Yes
+Refund Monitoring
+Yes
+Yes
+Yes
+Business Timeline
+Yes
+Yes
+Yes
+Revenue Opportunity Engine
+No
+Yes
+Yes
+Recommendation Tracking
+No
+Yes
+Yes
+Operational Memory
+No
+Yes
+Yes
+Weekly COO Reports
+No
+Yes
+Yes
+Multi-Store Management
+No
+No
+Yes
+Agency Reporting
+No
+No
+Yes
+2.2  Plan Identifiers
+Each plan requires a unique Shopify plan name string used when creating AppSubscription objects via the GraphQL API. These strings must remain stable; changing them breaks existing subscription references.
+Plan
+Internal Key
+Shopify Plan Name
+Amount (USD)
+Starter
+starter
+StorePilot Starter
+49.00
+Growth
+growth
+StorePilot Growth
+99.00
+Agency
+agency
+StorePilot Agency
+199.00
+2.3  Usage Limits & Enforcement
+2.3.1  AI Chat Message Limits
+AI Chat message counts are tracked per billing cycle per store. The billing cycle resets at the start of each Shopify billing period. When a merchant reaches 90% of their monthly limit, a warning is displayed in the AI COO Chat interface. At 100%, the chat input is disabled and a plan upgrade prompt is shown. Message counts are stored in the StorePilot database and are not enforced by Shopify.
+2.3.2  Store Limits
+Starter and Growth plans are hard-limited to 1 store. Agency plans allow up to 5 stores. Attempts to connect additional stores beyond the plan limit return a 403 error with an upgrade prompt. Store count is enforced at the application layer.
+2.3.3  Historical Data Access
+Data older than the plan's history window is retained in the database but excluded from all queries, dashboards, and AI context for merchants on plans with shorter history windows. Upgrading immediately unlocks access to all stored historical data. Data is never deleted on downgrade; it is only masked.
+SECTION 3  ·  Subscription Lifecycle
+3. Subscription Lifecycle
+3.1  Trial Lifecycle
+3.1.1  Trial Initiation
+When a merchant installs StorePilot and completes OAuth, the application creates an AppSubscription via Shopify GraphQL with a trialDays value of 14 and the merchant's selected plan (defaulting to Starter if no plan is explicitly chosen during onboarding).
+3.1.2  Trial States
+State
+Description
+System Behaviour
+PENDING
+Subscription created; awaiting merchant approval on Shopify confirmation page
+Store access restricted to onboarding only
+ACTIVE (Trial)
+Merchant approved subscription; trial days counting down
+Full plan features enabled; no charge applied
+TRIAL_EXPIRING
+3 days or fewer remaining in trial
+In-app banner shown; email notification sent
+TRIAL_EXPIRED
+Trial ended; first billing cycle begins
+Shopify initiates first charge; store remains active
+DECLINED
+Merchant declined Shopify confirmation page
+Subscription not created; merchant redirected to install page
+3.1.3  Trial Rules
+Trial duration is 14 calendar days from merchant approval of the subscription on Shopify's confirmation page.
+No credit card is required to start the trial. Shopify handles payment method collection when the trial ends.
+Trial entitlements are identical to the selected paid plan. Full feature access is granted during the trial.
+A merchant who uninstalls during trial and reinstalls within the same Shopify billing context does not receive a second 14-day trial. Refer to Section 3.6 for reinstallation logic.
+Trial period cannot be extended by the application. Extensions require manual Shopify Partner Dashboard intervention.
+3.2  Active Subscription Lifecycle
+3.2.1  States
+State
+Description
+System Behaviour
+ACTIVE
+Subscription paid and current
+Full entitlements enforced per plan
+FROZEN
+Shopify store frozen (merchant's Shopify subscription lapsed)
+StorePilot access suspended; data preserved
+CANCELLED
+Subscription cancelled by merchant or Shopify
+Access revoked; data retained per retention policy
+EXPIRED
+Subscription ended naturally (rare with recurring billing)
+Treat as CANCELLED
+DECLINED
+Recurring charge declined by Shopify
+Enter failed payment flow (Section 3.5)
+3.3  Upgrade Flow
+3.3.1  Merchant-Initiated Upgrade
+Merchant selects a higher-tier plan in StorePilot settings.
+StorePilot backend calls AppSubscription create via Shopify GraphQL with the new plan.
+Shopify generates a confirmation URL and returns it to StorePilot.
+StorePilot redirects the merchant to the Shopify confirmation page.
+Merchant approves the new subscription on Shopify's confirmation page.
+Shopify fires app_subscriptions/update webhook with status ACTIVE.
+StorePilot webhook handler updates the subscriptions table with the new plan_key, shopify_subscription_id, and status.
+StorePilot immediately applies new feature entitlements (increased chat limit, additional stores for Agency, extended history).
+StorePilot displays an upgrade confirmation in-app and records a timeline event.
+3.3.2  Upgrade Proration
+Shopify handles proration automatically when upgrading mid-cycle. Merchants are charged the prorated difference for the remainder of the billing cycle. StorePilot does not calculate or display proration amounts directly; it relies on Shopify's billing calculation. The upgrade confirmation page should inform merchants that Shopify will manage proration.
+3.3.3  Immediate Entitlement
+Feature entitlements must be upgraded immediately upon Shopify confirming the new subscription as ACTIVE. There must be no delay between subscription approval and feature access. Chat message limits are recalculated at the point of upgrade, not at the next billing cycle reset.
+3.4  Downgrade Flow
+3.4.1  Merchant-Initiated Downgrade
+Merchant selects a lower-tier plan in StorePilot settings.
+StorePilot displays a downgrade impact summary showing features that will be lost.
+Merchant confirms downgrade.
+StorePilot backend calls AppSubscription create with the lower-tier plan.
+Shopify generates a confirmation URL; merchant is redirected to confirm.
+Merchant approves; Shopify fires app_subscriptions/update webhook.
+StorePilot updates subscription record and applies lower-tier entitlements.
+Timeline event is recorded. Downgrade email notification is sent.
+3.4.2  Downgrade Constraints
+A merchant on Agency with 3 connected stores cannot downgrade to Growth or Starter until they disconnect stores to meet the 1-store limit. StorePilot must enforce this pre-check before initiating the downgrade flow.
+Historical data is not deleted on downgrade. It is masked at the query layer. Upgrading restores full access.
+AI Chat message usage counts are not reset on downgrade. The remaining messages available are recalculated against the new plan limit for the remainder of the current billing cycle.
+Downgrade takes effect at the start of the next billing cycle unless Shopify processes it immediately (Shopify handles timing).
+3.5  Failed Payment Handling
+3.5.1  Shopify Payment Retry Behaviour
+Shopify automatically retries failed recurring charges on its own schedule. StorePilot does not control retry timing. Shopify will fire app_subscriptions/update webhooks as retry outcomes are determined.
+3.5.2  StorePilot Response to Failed Payment
+Event
+Shopify Status
+StorePilot Action
+First charge failure
+DECLINED
+Send payment failure email; display in-app banner; maintain access for 3 days
+Shopify retry fails
+DECLINED (repeated)
+Restrict access to billing page only; maintain data
+Merchant updates payment on Shopify
+ACTIVE
+Restore full access immediately on ACTIVE webhook
+Shopify cancels subscription
+CANCELLED
+Enter cancellation flow (Section 3.6)
+3.5.3  Grace Period
+StorePilot provides a 3-day grace period from the first DECLINED webhook before restricting feature access. This prevents disruption from transient payment failures. During the grace period, the merchant sees an in-app payment failure banner with a link to their Shopify billing settings. Access restriction after 3 days means the merchant can only view the billing/account settings page.
+3.5.4  Data Preservation During Failure
+All store data, historical metrics, and operational memory are fully preserved during the failed payment and grace period. Data is never deleted due to payment failure. Access is restricted, not data destroyed.
+3.6  Cancellation Flow
+3.6.1  Merchant-Initiated Cancellation
+Merchants cancel through Shopify directly (via their Shopify admin, Partner Dashboard, or StorePilot settings). StorePilot does not provide a direct cancel button but provides a link to Shopify's subscription management.
+Merchant cancels through Shopify.
+Shopify fires app_subscriptions/update webhook with status CANCELLED.
+StorePilot webhook handler sets subscription status to CANCELLED and records cancelled_at timestamp.
+Access to StorePilot features is revoked immediately.
+Data is retained for 90 days post-cancellation (data retention period).
+Cancellation email is sent with data retention notice.
+3.6.2  Data Retention Post-Cancellation
+All store data is retained for 90 days after cancellation.
+If a merchant reinstalls within 90 days, their data is fully restored.
+After 90 days, a scheduled job marks data for deletion. Deletion executes in batches.
+Merchants are notified by email at 60 days and 85 days post-cancellation if data deletion is approaching.
+3.7  Reinstallation Flow
+3.7.1  Reinstall Within 90-Day Data Retention Window
+Merchant reinstalls StorePilot from Shopify App Store.
+StorePilot OAuth flow executes.
+StorePilot checks for existing store record by shop domain.
+Existing record found with status CANCELLED within retention window.
+StorePilot creates a new AppSubscription with NO trial days (trial already consumed).
+Merchant approves subscription; Shopify charges immediately for the billing cycle.
+On ACTIVE webhook, StorePilot restores all existing store data.
+In-app message confirms data restoration.
+3.7.2  Reinstall After 90-Day Data Retention Window
+Merchant reinstalls StorePilot.
+StorePilot OAuth flow executes.
+StorePilot checks for existing store record by shop domain.
+Existing record found but data has been deleted or marked for deletion.
+StorePilot creates a new AppSubscription with NO trial days.
+Onboarding executes as a fresh install. 90-day historical data import runs.
+In-app message notifies merchant that previous data was not retained.
+3.7.3  Trial on Reinstall
+A second 14-day trial is not granted on reinstallation regardless of circumstances. StorePilot must track trial_used boolean on the stores table. If trial_used is true, all new subscriptions for that shop domain are created with trialDays: 0.
+RULE
+One trial per shop domain. The shop domain is the canonical identifier. Merchant account changes or store transfers do not reset trial eligibility.
+SECTION 4  ·  Database Schema
+4. Database Schema
+The following tables extend StorePilot's core PostgreSQL schema (hosted on Supabase via Prisma ORM) specifically to support billing operations. These are additions to the existing core entities defined in the Founder Specification.
+4.1  subscriptions
+Primary billing state table. One active row per store at any time.
+Column
+Type
+Nullable
+Description
+id
+UUID
+NO
+Primary key
+store_id
+UUID
+NO
+FK → stores.id
+shopify_subscription_id
+VARCHAR(255)
+NO
+Shopify GID e.g. gid://shopify/AppSubscription/123
+plan_key
+VARCHAR(50)
+NO
+starter | growth | agency
+status
+VARCHAR(50)
+NO
+pending | active | cancelled | declined | frozen | expired
+is_trial
+BOOLEAN
+NO
+TRUE while within trial period
+trial_ends_at
+TIMESTAMPTZ
+YES
+Trial expiry datetime (UTC)
+billing_on
+DATE
+YES
+Next Shopify billing date
+current_period_start
+TIMESTAMPTZ
+YES
+Start of current billing cycle
+current_period_end
+TIMESTAMPTZ
+YES
+End of current billing cycle
+amount_usd
+DECIMAL(10,2)
+NO
+Plan price at time of creation
+grace_period_ends_at
+TIMESTAMPTZ
+YES
+Populated on DECLINED; 3 days from failure
+cancelled_at
+TIMESTAMPTZ
+YES
+Cancellation datetime (UTC)
+data_deletion_scheduled_at
+TIMESTAMPTZ
+YES
+90 days post-cancellation
+created_at
+TIMESTAMPTZ
+NO
+Row creation timestamp
+updated_at
+TIMESTAMPTZ
+NO
+Last update timestamp
+Indexes required: store_id (UNIQUE on active subscriptions), shopify_subscription_id (UNIQUE), status, data_deletion_scheduled_at.
+4.2  subscription_history
+Immutable audit log of all subscription state transitions. Never updated; only appended.
+Column
+Type
+Nullable
+Description
+id
+UUID
+NO
+Primary key
+subscription_id
+UUID
+NO
+FK → subscriptions.id
+store_id
+UUID
+NO
+FK → stores.id (denormalised for query efficiency)
+event_type
+VARCHAR(100)
+NO
+created | activated | upgraded | downgraded | cancelled | declined | reinstated | trial_started | trial_ended
+from_plan_key
+VARCHAR(50)
+YES
+Previous plan (null for new subscriptions)
+to_plan_key
+VARCHAR(50)
+NO
+New plan
+from_status
+VARCHAR(50)
+YES
+Previous status
+to_status
+VARCHAR(50)
+NO
+New status
+shopify_webhook_payload
+JSONB
+YES
+Raw webhook payload for audit
+triggered_by
+VARCHAR(50)
+NO
+shopify_webhook | merchant | system
+created_at
+TIMESTAMPTZ
+NO
+Event timestamp
+4.3  stores (billing-relevant columns)
+The existing stores table requires the following additional billing-specific columns:
+Column
+Type
+Default
+Description
+trial_used
+BOOLEAN
+FALSE
+Set TRUE on first trial activation. Never reset.
+trial_started_at
+TIMESTAMPTZ
+NULL
+Datetime of first trial activation
+billing_access_restricted
+BOOLEAN
+FALSE
+TRUE when access restricted due to payment failure
+data_deletion_scheduled_at
+TIMESTAMPTZ
+NULL
+Mirror of subscriptions.data_deletion_scheduled_at for join efficiency
+4.4  billing_alerts
+Tracks billing-related notifications sent to merchants to prevent duplicate sends.
+Column
+Type
+Nullable
+Description
+id
+UUID
+NO
+Primary key
+store_id
+UUID
+NO
+FK → stores.id
+alert_type
+VARCHAR(100)
+NO
+trial_expiring_3d | payment_failed | access_restricted | cancellation_confirmed | data_deletion_60d | data_deletion_85d | chat_limit_90pct | chat_limit_reached
+sent_at
+TIMESTAMPTZ
+NO
+When notification was sent
+channel
+VARCHAR(50)
+NO
+email | in_app
+billing_cycle_key
+VARCHAR(50)
+YES
+For per-cycle deduplication (e.g. 2024-06)
+4.5  plan_entitlements
+Static configuration table defining per-plan feature limits. Allows limit updates without code deployments.
+Column
+Type
+Example
+Description
+id
+UUID
+-
+Primary key
+plan_key
+VARCHAR(50)
+growth
+Plan identifier
+max_stores
+INTEGER
+1
+Maximum connected stores
+max_ai_messages_monthly
+INTEGER
+500
+Monthly AI chat message limit
+history_days
+INTEGER
+365
+NULL = unlimited
+features_json
+JSONB
+{...}
+Boolean feature flags by plan
+effective_from
+TIMESTAMPTZ
+-
+When this entitlement row became effective
+SECTION 5  ·  Required Shopify Webhooks
+5. Required Shopify Webhooks
+All webhooks must be registered during app installation. Shopify delivers webhooks via HTTPS POST. StorePilot must verify each webhook using HMAC-SHA256 signature validation before processing. Invalid signatures must return HTTP 401 and be logged.
+5.1  Webhook Registration
+Webhooks are registered during OAuth installation using the Shopify Admin API. The following table defines all required billing-related webhook topics and their StorePilot handlers.
+Webhook Topic
+Trigger
+StorePilot Handler Action
+app_subscriptions/update
+Subscription status change
+Primary billing state handler. Updates subscriptions table. Triggers entitlement changes, notifications, and timeline events.
+app/uninstalled
+Merchant uninstalls app
+Sets store status to inactive. Does not delete data. Schedules data deletion if subscription is not already cancelled.
+shop/update
+Shop details changed
+Updates store contact email and timezone. Used to keep billing notification email current.
+5.2  app_subscriptions/update — Handler Logic
+5.2.1  Status Routing
+The webhook handler must route on the status field in the payload and execute the appropriate state transition:
+Status
+StorePilot Action
+Notifications
+ACTIVE
+Set subscription status to active. Update plan entitlements. Clear grace_period_ends_at. Clear billing_access_restricted.
+None (unless reinstating from DECLINED – send payment restored email)
+DECLINED
+Set status to declined. Set grace_period_ends_at to now + 3 days. Schedule access restriction job.
+Payment failed email + in-app banner immediately
+CANCELLED
+Set status to cancelled. Set cancelled_at. Set data_deletion_scheduled_at to cancelled_at + 90 days. Revoke feature access.
+Cancellation confirmed email with data retention notice
+FROZEN
+Set billing_access_restricted to true. Suspend feature access.
+In-app banner only
+EXPIRED
+Treat identical to CANCELLED.
+Same as CANCELLED
+5.2.2  Idempotency Requirement
+Shopify may deliver the same webhook multiple times. The handler must be idempotent. Before processing, check if the shopify_subscription_id and status combination has already been processed via the subscription_history table. If an identical event exists, return HTTP 200 without reprocessing.
+5.2.3  Response Requirements
+Webhook endpoint must return HTTP 200 within 5 seconds.
+Processing that cannot complete in 5 seconds must be queued asynchronously.
+Shopify will retry webhooks that do not receive HTTP 200 within 5 seconds.
+Failed webhook processing must be logged with the full payload for manual recovery.
+5.3  app/uninstalled — Handler Logic
+Receive app/uninstalled webhook.
+Mark store as inactive in stores table.
+Check if active subscription exists.
+If subscription is ACTIVE: note that Shopify cancels the subscription separately; await app_subscriptions/update CANCELLED webhook.
+Do not delete any data. Set stores.is_active = false.
+Log uninstall event to subscription_history.
+SECTION 6  ·  Billing API Endpoints
+6. Billing API Endpoints
+All endpoints are implemented as Next.js API Routes. All billing endpoints require valid Shopify session authentication unless otherwise specified. Webhook endpoints use HMAC validation instead of session authentication.
+6.1  Endpoint Reference
+Endpoint
+Method
+Description
+SUBSCRIPTION MANAGEMENT
+/api/billing/subscription
+GET
+Returns current subscription state, plan details, trial status, and entitlements for the authenticated store
+/api/billing/subscribe
+POST
+Creates a new AppSubscription via Shopify GraphQL. Body: { plan_key }. Returns { confirmation_url } for redirect.
+/api/billing/change-plan
+POST
+Initiates plan upgrade or downgrade. Validates store and plan constraints. Returns Shopify confirmation URL.
+/api/billing/confirm
+GET
+Shopify redirects here post-approval with charge_id param. Validates approval and activates subscription in database.
+WEBHOOK HANDLERS
+/api/webhooks/shopify/subscription-update
+POST
+Handles app_subscriptions/update webhook. HMAC validated. Processes all subscription state transitions.
+/api/webhooks/shopify/app-uninstalled
+POST
+Handles app/uninstalled webhook. HMAC validated. Marks store inactive.
+/api/webhooks/shopify/shop-update
+POST
+Handles shop/update webhook. HMAC validated. Updates store contact details.
+ENTITLEMENTS
+/api/billing/entitlements
+GET
+Returns current plan entitlements for the authenticated store including AI message usage, store count, and feature flags.
+/api/billing/usage/ai-messages
+GET
+Returns current AI message usage count and limit for the billing cycle.
+/api/billing/usage/ai-messages/increment
+POST
+Increments AI message usage counter. Called server-side on each AI COO Chat response. Not exposed to frontend directly.
+PLAN INFORMATION
+/api/billing/plans
+GET
+Public endpoint. Returns plan definitions, pricing, and feature entitlements for marketing and settings pages. No auth required.
+6.2  Endpoint Specifications
+POST /api/billing/subscribe
+Request Body
+{ plan_key: 'starter' | 'growth' | 'agency' }
+Response — Success (200)
+{ confirmation_url: string, subscription_id: string }
+Response — Error (400)
+{ error: string, code: 'INVALID_PLAN' | 'ACTIVE_SUBSCRIPTION_EXISTS' | 'STORE_LIMIT_EXCEEDED' }
+Behaviour
+Validates plan_key against allowed values.
+Checks for existing active subscription — if found, returns ACTIVE_SUBSCRIPTION_EXISTS error.
+Checks trial_used flag — sets trialDays: 0 if trial already consumed.
+Calls Shopify appSubscriptionCreate GraphQL mutation.
+Creates subscriptions row with status pending.
+Returns Shopify confirmation URL to frontend for redirect.
+POST /api/billing/change-plan
+Pre-validation
+Verifies current subscription is ACTIVE.
+Verifies target plan is different from current plan.
+For downgrades to a lower store limit: checks connected store count. Returns error if merchant exceeds target plan's store limit.
+Response — Store Limit Conflict (409)
+{ error: 'Disconnect stores before downgrading', code: 'STORE_LIMIT_CONFLICT', connected_stores: 3, plan_limit: 1 }
+GET /api/billing/confirm
+Query Parameters
+?charge_id=<shopify_charge_id>&shop=<shop_domain>
+Behaviour
+Retrieves the AppSubscription from Shopify using the charge_id.
+Verifies status is ACTIVE.
+Updates subscriptions row with shopify_subscription_id, status active, and billing dates.
+Inserts subscription_history row with event_type activated.
+Sets stores.trial_used = true if this was a trial subscription.
+Redirects merchant to StorePilot dashboard.
+SECTION 7  ·  Acceptance Criteria
+7. Acceptance Criteria
+All acceptance criteria must pass before billing features are considered production-ready. Criteria are grouped by functional area.
+7.1  Trial
+ID
+Acceptance Criterion
+Priority
+T-01
+A new merchant who installs StorePilot and approves the subscription sees 14 days of free access with no charge applied.
+CRITICAL
+T-02
+No credit card is required at any point during the trial initiation.
+CRITICAL
+T-03
+A merchant who declines the Shopify confirmation page cannot access StorePilot features.
+CRITICAL
+T-04
+An in-app banner and email notification are sent when 3 days or fewer remain in the trial.
+HIGH
+T-05
+A merchant who reinstalls after cancellation does not receive a second trial.
+CRITICAL
+T-06
+trial_used is set to TRUE on first trial activation and is never reset.
+CRITICAL
+7.2  Plan Subscription
+ID
+Acceptance Criterion
+Priority
+S-01
+Subscribing to Starter at $49/month enforces 1-store limit, 100 AI message monthly limit, and 90-day history window.
+CRITICAL
+S-02
+Subscribing to Growth at $99/month enforces 1-store limit, 500 AI message monthly limit, and 365-day history window.
+CRITICAL
+S-03
+Subscribing to Agency at $199/month enforces 5-store limit, 1,500 AI message monthly limit, and unlimited history.
+CRITICAL
+S-04
+Attempting to subscribe with an invalid plan_key returns HTTP 400.
+HIGH
+7.3  Upgrade & Downgrade
+ID
+Acceptance Criterion
+Priority
+U-01
+Upgrading from Starter to Growth immediately unlocks Revenue Opportunity Engine, Recommendation Tracking, Operational Memory, Weekly COO Reports, and raises chat limit to 500.
+CRITICAL
+U-02
+Upgrading from Growth to Agency immediately enables 5-store capacity and raises chat limit to 1,500.
+CRITICAL
+U-03
+A merchant with 3 connected stores cannot initiate a downgrade from Agency to Starter or Growth; a clear error is returned.
+CRITICAL
+U-04
+Downgrading from Growth to Starter removes access to Revenue Opportunity Engine, Recommendation Tracking, Operational Memory, and Weekly COO Reports immediately upon Shopify confirmation.
+CRITICAL
+U-05
+Historical data beyond the new plan's history window is masked (not deleted) on downgrade.
+CRITICAL
+U-06
+An upgrade confirmation screen is displayed before redirecting to Shopify for approval.
+HIGH
+7.4  Payment Failure
+ID
+Acceptance Criterion
+Priority
+P-01
+A DECLINED webhook triggers a payment failed email and in-app banner within 60 seconds.
+CRITICAL
+P-02
+Full feature access is maintained for 3 days following the first DECLINED webhook.
+CRITICAL
+P-03
+After 3-day grace period expires, access is restricted to billing settings page only.
+CRITICAL
+P-04
+When Shopify sends ACTIVE after a payment is resolved, full access is restored immediately.
+CRITICAL
+P-05
+No store data is deleted during or after a payment failure.
+CRITICAL
+7.5  Cancellation & Reinstall
+ID
+Acceptance Criterion
+Priority
+C-01
+CANCELLED webhook immediately revokes feature access.
+CRITICAL
+C-02
+Store data is retained for exactly 90 days post-cancellation.
+HIGH
+C-03
+Merchants reinstalling within 90 days have all previous data fully restored.
+HIGH
+C-04
+Cancellation email includes 90-day data retention information.
+HIGH
+C-05
+Data deletion email reminders sent at 60 and 85 days post-cancellation.
+MEDIUM
+7.6  Webhooks & API
+ID
+Acceptance Criterion
+Priority
+W-01
+All Shopify webhooks are validated with HMAC-SHA256 before processing. Invalid signatures return HTTP 401.
+CRITICAL
+W-02
+Duplicate webhook delivery for the same event is handled idempotently without duplicate database writes.
+CRITICAL
+W-03
+All webhook endpoints respond with HTTP 200 within 5 seconds.
+CRITICAL
+W-04
+All billing API endpoints require valid Shopify session authentication.
+CRITICAL
+W-05
+All subscription state transitions are recorded in subscription_history.
+CRITICAL
+SECTION 8  ·  Edge Cases
+8. Edge Cases
+8.1  Trial Edge Cases
+Edge Case
+System Behaviour
+Notes
+Merchant declines Shopify confirmation page during install
+Subscription remains PENDING. StorePilot restricts access and prompts re-approval on next visit.
+Do not delete pending subscription record
+Merchant never approves after install (abandons onboarding)
+Scheduled job cancels PENDING subscriptions older than 7 days.
+Data not written yet so no retention needed
+Merchant changes plan during trial
+New subscription replaces old. Trial days remaining are transferred by Shopify (handled automatically).
+Verify Shopify API behaviour on plan change during trial
+Shopify charges merchant at end of trial unexpectedly early
+StorePilot processes app_subscriptions/update ACTIVE webhook and transitions to paid status.
+Shopify controls trial end timing
+8.2  Plan Transition Edge Cases
+Edge Case
+System Behaviour
+Notes
+Merchant upgrades but does not approve Shopify confirmation within 24 hours
+Old subscription remains active. Pending subscription is cancelled by scheduled job after 24 hours.
+Merchant remains on original plan
+Merchant submits multiple plan change requests simultaneously
+Idempotency check on shopify_subscription_id prevents duplicate subscriptions.
+Rate limit change-plan endpoint to 1 request per 60 seconds per store
+AI message count exceeds new plan limit at time of downgrade
+Usage is hard-capped at new plan limit. Remaining messages for the cycle: new_limit minus usage (minimum 0).
+No historical message deletion
+Webhook for plan change arrives before /api/billing/confirm is called
+Webhook handler processes the update. /api/billing/confirm detects active subscription and skips duplicate write.
+Both paths must be idempotent
+8.3  Payment & Access Edge Cases
+Edge Case
+System Behaviour
+Notes
+DECLINED webhook arrives multiple times before grace period expires
+Idempotency check prevents duplicate grace period creation. grace_period_ends_at is not extended on repeat DECLINED events.
+Log all DECLINED events
+Merchant's Shopify store is frozen (Shopify subscription lapsed)
+FROZEN webhook received. StorePilot suspends access. When Shopify unfreezes, ACTIVE webhook restores access.
+Shopify controls frozen state
+ACTIVE webhook arrives during grace period before 3 days expire
+Immediately clear grace period and restore full access. Cancel scheduled access restriction job.
+Grace period must be interruptible
+8.4  Data Retention Edge Cases
+Edge Case
+System Behaviour
+Notes
+Merchant reinstalls on day 89 of retention window
+Data is restored. New data_deletion_scheduled_at is cleared. Data treated as active store going forward.
+Reinstall within window always restores
+Merchant reinstalls after data deletion has partially executed
+Partial data restored. Onboarding re-imports the last 90 days from Shopify to fill gaps.
+Deletion job should be logged for forensics
+Merchant contacts Shopify support and gets a refund; Shopify cancels subscription retroactively
+CANCELLED webhook received. Standard cancellation flow applies.
+StorePilot does not issue refunds directly
+SECTION 9  ·  Security Considerations
+9. Security Considerations
+9.1  Webhook Security
+Every inbound Shopify webhook must be validated using HMAC-SHA256. The X-Shopify-Hmac-Sha256 header is compared against a server-side computed HMAC of the raw request body using the Shopify App Secret as the key.
+Webhook endpoints must read the raw request body for HMAC validation before any JSON parsing. Parsing before HMAC validation creates a bypass risk.
+Webhook validation failures must return HTTP 401 and be logged with IP, timestamp, and the first 32 bytes of the request for investigation.
+Webhook endpoints must not be rate-limited by Shopify's standard rate limits but should implement their own DDoS protection at the infrastructure level via Vercel's edge network.
+9.2  API Security
+All billing API endpoints (except /api/billing/plans) require a valid Shopify session token validated server-side.
+Session tokens must be validated on every request, not cached. Token expiry must be enforced.
+Store isolation must be enforced at the query level. Queries must always filter by the authenticated store's ID. Cross-store data access must be impossible at the application layer.
+The /api/billing/usage/ai-messages/increment endpoint must be called server-side only and must never be exposed to the client-side JavaScript bundle in a way that allows merchant manipulation of usage counts.
+9.3  Data Security
+StorePilot must never store, log, or transmit merchant payment card details, bank account information, or Shopify payment credentials.
+The Shopify App Secret used for HMAC validation must be stored as an environment variable and never committed to source control or exposed in application logs.
+All database connections must use TLS. Supabase connection strings must be stored as encrypted environment variables.
+shopify_webhook_payload columns in subscription_history must be sanitised to exclude any personally identifiable information before storage if applicable.
+9.4  Billing Integrity
+StorePilot must never modify a subscription's billing amount or trial period outside of the Shopify API. Pricing is defined exclusively in the Shopify Partner Dashboard and passed through the API.
+All subscription state changes must be sourced from Shopify webhooks or explicit Shopify API calls. StorePilot must never unilaterally change a subscription status to ACTIVE without Shopify confirmation.
+The subscription_history table must be append-only. No application code may UPDATE or DELETE rows from this table. Database-level row security policies must enforce this.
+9.5  Compliance
+StorePilot must comply with Shopify's Partner Program billing requirements. Violation of Shopify billing terms may result in app removal from the Shopify App Store.
+If StorePilot expands to non-Shopify billing in future, PCI-DSS compliance requirements must be assessed before implementation.
+SECTION 10  ·  Future Billing Scalability
+10. Future Billing Scalability
+This section defines architectural considerations to ensure the V1 billing implementation can scale to accommodate future requirements without full rebuilds. These items are not V1 deliverables.
+10.1  Usage-Based Billing Readiness
+StorePilot's V1 billing is purely subscription-based. However, future monetisation models may include usage-based components — for example, charging per AI message beyond plan limits rather than hard-blocking. The billing_alerts and plan_entitlements tables should be designed to support overage configuration without schema changes. The ai_message usage tracking infrastructure built in V1 is the foundation for this.
+10.2  Annual Billing Plans
+Annual billing offers merchants a discount incentive and improves revenue predictability. Shopify's App Subscriptions API supports annual billing via interval: ANNUAL. V1 subscription creation should parameterise the billing interval to avoid hard-coding EVERY_30_DAYS. This allows annual plans to be introduced via configuration without code changes.
+10.3  Multi-Platform Billing
+The Founder Specification explicitly excludes WooCommerce, BigCommerce, and other platforms from V1. However, the billing abstraction layer should be designed to allow future payment providers (Stripe, Paddle) to be introduced without rewriting core subscription lifecycle logic. The subscriptions table should include a billing_provider column (defaulting to shopify) to support this future routing.
+10.4  Per-Store Billing for Agency Tier
+The Agency plan currently bundles 5 stores at a flat $199/month. Future iteration may introduce per-store pricing above the bundle threshold (e.g., $199 for 5 stores, $30/store beyond that). The plan_entitlements schema should accommodate an overage_price_per_unit field for this model.
+10.5  Partner & Affiliate Billing
+Shopify's Partner Revenue Share model may evolve. Future implementations may require tracking referral sources for revenue attribution. The subscriptions table should support a referral_code or partner_id foreign key for this purpose. No V1 implementation is required.
+10.6  Promotional Pricing & Coupons
+Shopify's App Subscription API supports custom trial periods and discount codes through partner agreements. The billing flow should accommodate a promo_code parameter in the subscribe endpoint that maps to extended trial periods or discounted first cycles when configured in the Partner Dashboard. V1 does not implement promotional pricing but must not architecturally prevent it.
+10.7  Billing Dashboard for Agency Merchants
+Agency plan merchants managing 5 stores will require a consolidated billing view showing per-store subscription status, data usage, and AI message consumption. The multi-store billing view should be designed as an extension of the existing entitlements endpoint structure rather than a separate billing system.
+10.8  Automated Revenue Recovery
+V1 relies on Shopify's default payment retry logic. Future iterations should implement proactive dunning management: automated email sequences to merchants with declining payments, in-app payment update prompts, and potentially a Shopify Partner Dashboard integration to monitor declined charges at scale.
+StorePilot Billing Specification v1.0  ·  Confidential  ·  All billing handled exclusively via Shopify Managed Billing

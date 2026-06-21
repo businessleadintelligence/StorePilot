@@ -1,0 +1,1882 @@
+STOREPILOT
+AI Operational Intelligence Platform for Shopify
+DATABASE DESIGN SPECIFICATION
+Version 1.0  |  Principal Database Architect Reference  |  Based on Founder Specification v1.0
+Table of Contents
+1. Database Design Overview
+Database Engine
+PostgreSQL (latest stable)
+Hosting
+Supabase (managed PostgreSQL with PgBouncer connection pooling)
+ORM
+Prisma (schema-first, type-safe)
+Migration Strategy
+Prisma Migrate — version-controlled, sequential migration files
+Connection Pooling
+Supabase PgBouncer (transaction mode for serverless)
+Row-Level Security
+Supabase RLS policies on all tables (defense-in-depth)
+Encryption
+Column-level AES-256 for accessToken and ga4RefreshToken; Supabase at-rest encryption for all data
+Total Core Tables
+14 tables across 5 logical layers
+1.1 Design Principles
+Multi-tenancy: Every table containing merchant data includes a storeId foreign key. No cross-store query is possible without explicitly crossing tenant boundaries.
+Soft-delete over hard-delete: Anomalies, recommendations, and timeline events are never deleted — they form the operational memory moat.
+Append-only metrics: Daily metrics tables grow by insertion, never update. Historical accuracy is preserved.
+Deterministic-first: The database stores all pre-computed deterministic values (scores, impact figures). The AI layer reads these values; it never computes them.
+Normalization balanced with query performance: Denormalization is applied deliberately in high-frequency read paths (e.g., storeId on all child tables for direct index access).
+1.2 Table Layer Map
+Layer
+Tables
+Purpose
+Core
+stores, users
+Store tenancy, authentication, subscription management
+Catalog
+products
+Shopify product/variant sync
+Metrics
+store_metrics_daily, product_metrics_daily, inventory_daily, traffic_daily
+Append-only time-series operational data
+Intelligence
+anomalies, anomaly_causes, recommendations, recommendation_outcomes
+Detected issues, AI explanations, recommendations, and outcomes
+Memory
+timeline_events
+Chronological operational event log — the Business Timeline
+AI
+reports, ai_conversations
+Generated reports, chat history, monthly usage counters
+2. Entity Relationship Overview
+2.1 Relationship Summary
+Parent Table
+Child Table
+Relationship
+Join Key
+Notes
+stores
+users
+1 : Many
+users.storeId
+One store can have multiple users (Agency plan future)
+stores
+products
+1 : Many
+products.storeId
+All products belong to a store
+stores
+store_metrics_daily
+1 : Many
+store_metrics_daily.storeId
+One row per store per day
+products
+product_metrics_daily
+1 : Many
+product_metrics_daily.productId
+One row per product per day
+products
+inventory_daily
+1 : Many
+inventory_daily.productId
+One row per product per day
+stores
+traffic_daily
+1 : Many
+traffic_daily.storeId
+Null rows when GA4 not connected
+stores
+anomalies
+1 : Many
+anomalies.storeId
+All detected anomalies for a store
+anomalies
+anomaly_causes
+1 : 1
+anomaly_causes.anomalyId
+One AI-generated cause per anomaly
+anomalies
+recommendations
+1 : Many
+recommendations.anomalyId
+One anomaly can produce multiple recommendations
+recommendations
+recommendation_outcomes
+1 : 1
+recommendation_outcomes.recommendationId
+Outcome recorded when recommendation is completed
+stores
+timeline_events
+1 : Many
+timeline_events.storeId
+Full operational history for a store
+stores
+reports
+1 : Many
+reports.storeId
+All generated COO reports for a store
+stores
+ai_conversations
+1 : Many
+ai_conversations.storeId
+Chat history + monthly message counter
+2.2 Entity Relationship Diagram (Text)
+stores
+  ├── users (1:M)                 [storeId]
+  ├── products (1:M)              [storeId]
+  │     ├── product_metrics_daily (1:M)   [productId]
+  │     └── inventory_daily (1:M)         [productId]
+  ├── store_metrics_daily (1:M)   [storeId]
+  ├── traffic_daily (1:M)         [storeId] (nullable when GA4 off)
+  ├── anomalies (1:M)             [storeId]
+  │     ├── anomaly_causes (1:1)           [anomalyId]
+  │     └── recommendations (1:M)          [anomalyId]
+  │           └── recommendation_outcomes (1:1) [recommendationId]
+  ├── timeline_events (1:M)       [storeId]
+  ├── reports (1:M)               [storeId]
+  └── ai_conversations (1:M)      [storeId]
+3. Table Definitions
+Each table definition includes: purpose, column specifications (with type, nullability, defaults, and constraints), index recommendations, and design notes.
+Yellow = Primary Key (PK)
+Blue = Foreign Key (FK)
+Red No = NOT NULL
+Amber = Constraint/Key exists
+🏪  stores  [Core]
+Master tenant table. One row per connected Shopify store. Holds the OAuth access token, subscription plan, GA4 credentials, sync state, and merchant preferences. This is the root of all multi-tenant data isolation.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Primary key — internal store identifier
+shopifyDomain
+VARCHAR(255)
+No
+—
+UNIQUE, NOT NULL
+e.g. merchant-store.myshopify.com
+shopifyId
+VARCHAR(100)
+No
+—
+UNIQUE, NOT NULL
+Shopify-assigned store GID
+accessToken
+TEXT
+No
+—
+NOT NULL, ENCRYPTED
+Shopify OAuth token — AES-256 encrypted at application level
+storeName
+VARCHAR(255)
+No
+—
+NOT NULL
+Display name synced from Shopify
+currency
+VARCHAR(10)
+No
+USD
+NOT NULL
+Store's primary currency code
+timezone
+VARCHAR(100)
+No
+UTC
+NOT NULL
+Store's configured timezone
+subscriptionPlan
+ENUM
+No
+starter
+NOT NULL
+starter | growth | agency
+subscriptionStatus
+ENUM
+No
+trialing
+NOT NULL
+trialing | active | past_due | cancelled
+trialEndsAt
+TIMESTAMPTZ
+Yes
+—
+—
+Trial expiry — null after conversion to paid
+ga4PropertyId
+VARCHAR(100)
+Yes
+—
+—
+GA4 property ID — null if GA4 not connected
+ga4RefreshToken
+TEXT
+Yes
+—
+ENCRYPTED
+GA4 OAuth refresh token — AES-256 encrypted
+ga4ConnectedAt
+TIMESTAMPTZ
+Yes
+—
+—
+When GA4 was connected — null if not connected
+briefingTime
+TIME
+No
+08:00
+NOT NULL
+Merchant-selected daily briefing delivery hour
+briefingTimezone
+VARCHAR(100)
+No
+UTC
+NOT NULL
+Timezone for briefing delivery
+active
+BOOLEAN
+No
+true
+NOT NULL
+False when store has uninstalled the app
+historicalImportDone
+BOOLEAN
+No
+false
+NOT NULL
+True after 90-day historical import completes
+lastOrdersSyncAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful orders sync timestamp
+lastInventorySyncAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful inventory sync timestamp
+lastRefundsSyncAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful refunds sync timestamp
+lastProductsSyncAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful products sync timestamp
+lastGa4SyncAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful GA4 sync — null if GA4 not connected
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Store onboarding timestamp
+updatedAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Auto-updated on every row change
+Indexes — stores
+Index Name
+Columns
+Type
+Purpose
+stores_shopify_domain_key
+shopifyDomain
+UNIQUE
+OAuth callback lookup, deduplication
+stores_active_plan_idx
+active, subscriptionPlan
+BTREE
+Cron job fan-out: fetch all active stores by plan tier
+stores_briefing_time_idx
+briefingTime
+BTREE
+Daily briefing cron: find stores by delivery hour
+👤  users  [Core]
+Merchant user accounts. In V1, one user per store (the store owner). The schema supports multiple users per store for the future Agency Team Access feature.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Internal user identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store — all queries scoped by store
+email
+VARCHAR(320)
+No
+—
+NOT NULL
+Merchant email address
+name
+VARCHAR(255)
+Yes
+—
+—
+Display name
+role
+ENUM
+No
+owner
+NOT NULL
+owner | member (member reserved for future Team Access)
+lastLoginAt
+TIMESTAMPTZ
+Yes
+—
+—
+Last successful login timestamp
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Account creation timestamp
+updatedAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Auto-updated on row change
+Indexes — users
+Index Name
+Columns
+Type
+Purpose
+users_store_id_idx
+storeId
+BTREE
+All user lookups are scoped by store
+users_email_store_idx
+email, storeId
+UNIQUE
+Prevent duplicate emails within a store
+📦  products  [Core]
+Shopify product and variant catalog, synced every 6 hours. Serves as the dimension table for product_metrics_daily and inventory_daily.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Internal product identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+shopifyProductId
+VARCHAR(100)
+No
+—
+NOT NULL
+Shopify product GID
+shopifyVariantId
+VARCHAR(100)
+Yes
+—
+—
+Shopify variant GID — null for parent product rows
+title
+VARCHAR(500)
+No
+—
+NOT NULL
+Product title
+sku
+VARCHAR(255)
+Yes
+—
+—
+Stock keeping unit
+status
+ENUM
+No
+active
+NOT NULL
+active | archived | draft
+price
+DECIMAL(12,2)
+No
+0.00
+NOT NULL
+Current selling price in store currency
+inventoryTracked
+BOOLEAN
+No
+true
+NOT NULL
+Whether Shopify tracks inventory for this variant
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+First sync timestamp
+updatedAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Auto-updated on row change
+Indexes — products
+Index Name
+Columns
+Type
+Purpose
+products_store_id_idx
+storeId
+BTREE
+All product queries scoped by store
+products_shopify_product_id_idx
+storeId, shopifyProductId
+UNIQUE
+Upsert on Shopify sync
+products_shopify_variant_id_idx
+storeId, shopifyVariantId
+BTREE
+Variant-level inventory lookups
+products_status_idx
+storeId, status
+BTREE
+Filter active products for monitoring
+📊  store_metrics_daily  [Metrics]
+Append-only daily aggregate metrics per store. This is the primary table for revenue trend detection, conversion monitoring, and refund spike detection. One row per store per day. Never updated — historical rows are immutable.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+date
+DATE
+No
+—
+NOT NULL
+The calendar date this row covers
+revenue
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Total gross revenue for the day (store currency)
+orderCount
+INTEGER
+No
+0
+NOT NULL
+Total orders placed on this date
+avgOrderValue
+DECIMAL(12,2)
+No
+0.00
+NOT NULL
+revenue / orderCount (0 when orderCount = 0)
+sessionCount
+INTEGER
+Yes
+—
+—
+Total store sessions — null if GA4 not connected
+conversionRate
+DECIMAL(6,4)
+Yes
+—
+—
+orderCount / sessionCount — null if no session data
+refundCount
+INTEGER
+No
+0
+NOT NULL
+Total refunds processed on this date
+refundAmount
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Total refund value in store currency
+refundRate
+DECIMAL(6,4)
+No
+0.0000
+NOT NULL
+refundAmount / revenue (0 when revenue = 0)
+revenueHealthScore
+SMALLINT
+Yes
+—
+0–100
+Computed revenue health dimension (0–100)
+conversionHealthScore
+SMALLINT
+Yes
+—
+0–100
+Computed conversion health dimension (0–100)
+refundHealthScore
+SMALLINT
+Yes
+—
+0–100
+Computed refund health dimension (0–100)
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row insert timestamp
+Indexes — store_metrics_daily
+Index Name
+Columns
+Type
+Purpose
+smd_store_date_idx
+storeId, date DESC
+BTREE
+Primary time-series query: last N days for a store
+smd_store_date_unique
+storeId, date
+UNIQUE
+Prevent duplicate daily rows per store
+smd_revenue_idx
+storeId, revenue DESC
+BTREE
+Revenue trend queries and baseline calculations
+Design Note: Health score dimensions are stored here (not computed at query time) to keep dashboard reads fast. They are calculated by the deterministic engine during each sync cycle and written once per day.
+📈  product_metrics_daily  [Metrics]
+Append-only daily performance metrics per product/variant. Drives product-level revenue opportunity detection. One row per product per day.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store — denormalized for direct index access
+productId
+UUID
+No
+—
+FK -> products.id
+Parent product
+date
+DATE
+No
+—
+NOT NULL
+Calendar date
+unitsSold
+INTEGER
+No
+0
+NOT NULL
+Units sold on this date
+revenue
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Product revenue on this date
+refundUnits
+INTEGER
+No
+0
+NOT NULL
+Units refunded on this date
+refundRevenue
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Refund value on this date
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row insert timestamp
+Indexes — product_metrics_daily
+Index Name
+Columns
+Type
+Purpose
+pmd_store_date_idx
+storeId, date DESC
+BTREE
+Store-level product performance over time
+pmd_product_date_idx
+productId, date DESC
+BTREE
+Per-product performance trend
+pmd_unique_idx
+productId, date
+UNIQUE
+Prevent duplicate rows per product per day
+🏭  inventory_daily  [Metrics]
+Daily inventory snapshot per product/variant. Drives Inventory Risk anomaly detection (≤14 days estimated stock). One row per product per day.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store — denormalized for index access
+productId
+UUID
+No
+—
+FK -> products.id
+Parent product/variant
+date
+DATE
+No
+—
+NOT NULL
+Calendar date of snapshot
+quantityOnHand
+INTEGER
+No
+0
+NOT NULL
+Units in stock across all locations
+avgDailySales
+DECIMAL(8,2)
+No
+0.00
+NOT NULL
+Rolling 14-day average daily unit sales
+daysOfStockLeft
+DECIMAL(8,2)
+No
+0.00
+NOT NULL
+quantityOnHand / avgDailySales (0 when avgDailySales = 0)
+atRisk
+BOOLEAN
+No
+false
+NOT NULL
+True when daysOfStockLeft <= 14 — the anomaly trigger
+inventoryHealthScore
+SMALLINT
+Yes
+—
+0–100
+Computed inventory health for this product on this date
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row insert timestamp
+Indexes — inventory_daily
+Index Name
+Columns
+Type
+Purpose
+inv_store_date_idx
+storeId, date DESC
+BTREE
+Store-level inventory overview
+inv_product_date_idx
+productId, date DESC
+BTREE
+Per-product inventory trend
+inv_at_risk_idx
+storeId, atRisk, date DESC
+BTREE
+Fast query for at-risk products on dashboard
+inv_unique_idx
+productId, date
+UNIQUE
+Prevent duplicate snapshot rows
+📡  traffic_daily  [Metrics]
+Daily GA4 traffic metrics. Populated only when GA4 is connected. Absence of rows (vs null values) signals GA4 is disconnected. Drives Traffic Drop and Checkout Drop anomaly detection.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+date
+DATE
+No
+—
+NOT NULL
+Calendar date
+sessions
+INTEGER
+No
+0
+NOT NULL
+Total GA4 sessions on this date
+checkoutInitiated
+INTEGER
+No
+0
+NOT NULL
+Sessions that reached checkout initiation
+checkoutCompleted
+INTEGER
+No
+0
+NOT NULL
+Sessions that completed checkout
+checkoutConversionRate
+DECIMAL(6,4)
+No
+0.0000
+NOT NULL
+checkoutCompleted / checkoutInitiated (0 when denominator = 0)
+trafficHealthScore
+SMALLINT
+Yes
+—
+0–100
+Computed traffic health dimension (0–100)
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row insert timestamp
+Indexes — traffic_daily
+Index Name
+Columns
+Type
+Purpose
+trf_store_date_idx
+storeId, date DESC
+BTREE
+Time-series traffic queries
+trf_unique_idx
+storeId, date
+UNIQUE
+Prevent duplicate daily rows
+When GA4 is not connected, the Traffic Health dimension is excluded from the Store Health Score calculation and the remaining four dimensions are rescaled to 100%. Do not insert placeholder zero-rows when GA4 is disconnected — absence of rows is the signal.
+⚠️  anomalies  [Intelligence]
+Detected operational anomalies. Created by the deterministic anomaly detection engine when a threshold is breached. Never hard-deleted — resolved anomalies are closed with a resolvedAt timestamp. Feeds the Issues Center and Business Timeline.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Anomaly identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+type
+ENUM
+No
+—
+NOT NULL
+revenue_drop | conversion_drop | inventory_risk | refund_spike | traffic_drop | checkout_drop
+severity
+ENUM
+No
+—
+NOT NULL
+critical | warning | info
+triggeredAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+When the anomaly threshold was first breached
+resolvedAt
+TIMESTAMPTZ
+Yes
+—
+—
+Null = active; set when anomaly is resolved
+metricValue
+DECIMAL(14,4)
+No
+—
+NOT NULL
+The actual metric value at trigger time (e.g. 0.087 for 8.7% conversion)
+baselineValue
+DECIMAL(14,4)
+No
+—
+NOT NULL
+The comparison baseline value (e.g. 30-day average)
+percentChange
+DECIMAL(8,4)
+No
+—
+NOT NULL
+Signed percent change: ((metric - baseline) / baseline) * 100
+revenueImpact
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Estimated monthly revenue impact in store currency (from Revenue Impact Engine)
+confidenceScore
+SMALLINT
+No
+—
+NOT NULL, 0–100
+Confidence score from confidence engine
+confidenceLevel
+ENUM
+No
+—
+NOT NULL
+very_high | high | moderate | low
+productId
+UUID
+Yes
+—
+FK -> products.id
+Set for product-level anomalies (e.g. inventory_risk per product)
+idempotencyKey
+VARCHAR(255)
+No
+—
+UNIQUE
+Prevents duplicate anomaly creation from repeated webhook/cron triggers
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row creation timestamp
+updatedAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Auto-updated on change
+Indexes — anomalies
+Index Name
+Columns
+Type
+Purpose
+ano_store_status_idx
+storeId, resolvedAt
+BTREE
+Active issues query (resolvedAt IS NULL = active)
+ano_store_type_idx
+storeId, type, triggeredAt DESC
+BTREE
+Anomaly history by type for operational memory
+ano_store_severity_idx
+storeId, severity, resolvedAt
+BTREE
+Dashboard: critical issues count
+ano_idempotency_key
+idempotencyKey
+UNIQUE
+Deduplication of concurrent webhook/cron triggers
+ano_revenue_impact_idx
+storeId, revenueImpact DESC
+BTREE
+Priority Issues ranking by revenue impact
+🔍  anomaly_causes  [Intelligence]
+AI-generated cause explanations for each anomaly. One row per anomaly. Written by the AI layer immediately after anomaly creation. Stored separately to keep the anomalies table lean and to allow cause regeneration without mutating the anomaly record.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+anomalyId
+UUID
+No
+—
+FK -> anomalies.id, UNIQUE
+Parent anomaly — 1:1 relationship
+causeText
+TEXT
+No
+—
+NOT NULL
+AI-generated explanation of likely cause
+promptVersion
+VARCHAR(50)
+No
+—
+NOT NULL
+Prompt template version used — enables re-generation with updated prompts
+modelUsed
+VARCHAR(100)
+No
+—
+NOT NULL
+OpenAI model identifier (e.g. gpt-4o-mini)
+tokensUsed
+INTEGER
+Yes
+—
+—
+Token count for cost tracking
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Generation timestamp
+Indexes — anomaly_causes
+Index Name
+Columns
+Type
+Purpose
+ac_anomaly_id_key
+anomalyId
+UNIQUE
+One cause per anomaly; fast lookup by anomalyId
+💡  recommendations  [Intelligence]
+Full recommendation records including all five required components (Problem, Cause, Impact, Action, Confidence) plus lifecycle status tracking. The status field implements the Recommendation Tracking feature. Never hard-deleted.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Recommendation identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store — denormalized for direct queries
+anomalyId
+UUID
+No
+—
+FK -> anomalies.id
+The anomaly this recommendation addresses
+status
+ENUM
+No
+pending
+NOT NULL
+pending | accepted | ignored | completed
+problem
+TEXT
+No
+—
+NOT NULL
+Plain-language description of the detected problem
+cause
+TEXT
+No
+—
+NOT NULL
+AI-generated likely cause explanation
+impact
+TEXT
+No
+—
+NOT NULL
+Business impact statement (includes revenueImpact figure)
+action
+TEXT
+No
+—
+NOT NULL
+Specific recommended action for the merchant
+revenueImpact
+DECIMAL(14,2)
+No
+0.00
+NOT NULL
+Estimated monthly revenue impact (from Revenue Impact Engine)
+confidenceScore
+SMALLINT
+No
+—
+NOT NULL, 0–100
+Confidence score (0–100)
+confidenceLevel
+ENUM
+No
+—
+NOT NULL
+very_high | high | moderate | low
+urgency
+SMALLINT
+No
+5
+NOT NULL, 1–10
+Urgency score (1–10) used in priority formula
+priorityScore
+DECIMAL(14,4)
+No
+0.0000
+NOT NULL
+revenueImpact x confidenceScore x urgency
+acceptedAt
+TIMESTAMPTZ
+Yes
+—
+—
+When merchant accepted — null if not accepted
+ignoredAt
+TIMESTAMPTZ
+Yes
+—
+—
+When merchant ignored — null if not ignored
+completedAt
+TIMESTAMPTZ
+Yes
+—
+—
+When merchant marked complete — null if not complete
+promptVersion
+VARCHAR(50)
+No
+—
+NOT NULL
+Prompt template version for regeneration tracing
+modelUsed
+VARCHAR(100)
+No
+—
+NOT NULL
+OpenAI model identifier
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Generation timestamp
+updatedAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Auto-updated on status change
+Indexes — recommendations
+Index Name
+Columns
+Type
+Purpose
+rec_store_status_idx
+storeId, status
+BTREE
+Issues Center: filter by status
+rec_store_priority_idx
+storeId, priorityScore DESC
+BTREE
+Dashboard: Priority Issues section (top N by score)
+rec_anomaly_id_idx
+anomalyId
+BTREE
+Lookup recommendations for a given anomaly
+rec_store_created_idx
+storeId, createdAt DESC
+BTREE
+Recommendation history queries
+✅  recommendation_outcomes  [Intelligence]
+Records the actual business impact after a recommendation is marked completed. One row per completed recommendation. This dataset is the foundation of the Recommendation Outcomes feature and the future proprietary intelligence asset mentioned in the Founder Specification.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Row identifier
+recommendationId
+UUID
+No
+—
+FK -> recommendations.id, UNIQUE
+Parent recommendation — 1:1
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store — denormalized for reporting
+measuredAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+When the outcome was measured
+measurementWindowDays
+SMALLINT
+No
+14
+NOT NULL
+Days post-completion over which outcome was measured
+revenueImpactActual
+DECIMAL(14,2)
+Yes
+—
+—
+Actual measured revenue change — null if unmeasurable
+revenueImpactEstimated
+DECIMAL(14,2)
+No
+—
+NOT NULL
+Original estimated revenue impact from recommendation
+anomalyResolved
+BOOLEAN
+No
+false
+NOT NULL
+Whether the underlying anomaly was resolved post-recommendation
+outcomeNotes
+TEXT
+Yes
+—
+—
+Optional AI-generated outcome summary
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row creation timestamp
+Indexes — recommendation_outcomes
+Index Name
+Columns
+Type
+Purpose
+ro_recommendation_id_key
+recommendationId
+UNIQUE
+One outcome per recommendation
+ro_store_id_idx
+storeId
+BTREE
+Store-level outcome reporting for AI COO Impact Score
+🕐  timeline_events  [Memory]
+Chronological operational event log. This is the Business Timeline feature and is described as a core moat in the Founder Specification. Append-only — events are never updated or deleted. The AI layer queries this table to provide historical context in explanations.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Event identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+eventType
+ENUM
+No
+—
+NOT NULL
+See Event Types table below
+occurredAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+When the event occurred (not when it was recorded)
+title
+VARCHAR(500)
+No
+—
+NOT NULL
+Human-readable event title (e.g. 'Revenue Drop Detected')
+description
+TEXT
+Yes
+—
+—
+Optional longer description
+revenueImpact
+DECIMAL(14,2)
+Yes
+—
+—
+Revenue impact if applicable — null for non-revenue events
+anomalyId
+UUID
+Yes
+—
+FK -> anomalies.id
+Linked anomaly if this event is anomaly-related
+recommendationId
+UUID
+Yes
+—
+FK -> recommendations.id
+Linked recommendation if this event is recommendation-related
+metadata
+JSONB
+Yes
+—
+—
+Flexible additional data (e.g. metric values at event time)
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Row insert timestamp — may differ from occurredAt for backfilled events
+Event Types Enum
+Event Type
+Description
+Created By
+revenue_drop_detected
+Revenue anomaly triggered
+Anomaly detection engine
+revenue_recovered
+Revenue anomaly resolved
+Anomaly resolution process
+conversion_drop_detected
+Conversion rate anomaly triggered
+Anomaly detection engine
+inventory_risk_detected
+Inventory risk anomaly triggered (product-level)
+Anomaly detection engine
+inventory_risk_resolved
+Inventory risk anomaly resolved
+Anomaly resolution process
+refund_spike_detected
+Refund rate anomaly triggered
+Anomaly detection engine
+traffic_drop_detected
+Traffic anomaly triggered (requires GA4)
+Anomaly detection engine
+checkout_drop_detected
+Checkout drop anomaly triggered (requires GA4)
+Anomaly detection engine
+recommendation_created
+New recommendation generated
+Recommendation engine
+recommendation_accepted
+Merchant accepted a recommendation
+Recommendation status update
+recommendation_ignored
+Merchant ignored a recommendation
+Recommendation status update
+recommendation_completed
+Merchant marked recommendation as completed
+Recommendation status update
+onboarding_complete
+Merchant completed onboarding flow
+Onboarding system
+ga4_connected
+Merchant connected Google Analytics 4
+GA4 OAuth flow
+ga4_disconnected
+GA4 integration disconnected
+GA4 OAuth flow
+historical_import_complete
+90-day historical data import finished
+Sync system
+Indexes — timeline_events
+Index Name
+Columns
+Type
+Purpose
+te_store_occurred_idx
+storeId, occurredAt DESC
+BTREE
+Primary timeline query: last N events for a store
+te_store_type_idx
+storeId, eventType
+BTREE
+Filter timeline by event type
+te_anomaly_id_idx
+anomalyId
+BTREE
+Link anomaly to its timeline events
+te_recommendation_id_idx
+recommendationId
+BTREE
+Link recommendation to its timeline events
+The timeline_events table is append-only. No UPDATE or DELETE operations are permitted on this table. All application code and database roles must enforce this constraint. This immutability is what makes the Business Timeline a reliable historical record.
+📋  reports  [AI]
+Generated COO reports — daily briefings, weekly reports, and monthly executive reviews. Stores the rendered content so historical reports are accessible without regeneration.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Report identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+type
+ENUM
+No
+—
+NOT NULL
+daily_briefing | weekly_report | monthly_review
+periodStart
+DATE
+No
+—
+NOT NULL
+Start of the reporting period
+periodEnd
+DATE
+No
+—
+NOT NULL
+End of the reporting period
+content
+TEXT
+No
+—
+NOT NULL
+Full AI-generated report content
+healthScore
+SMALLINT
+Yes
+—
+0–100
+Store Health Score at time of report generation
+revenueAtRisk
+DECIMAL(14,2)
+Yes
+—
+—
+Revenue At Risk figure at time of report generation
+revenueOpp
+DECIMAL(14,2)
+Yes
+—
+—
+Revenue Opportunity figure at time of report generation
+emailSentAt
+TIMESTAMPTZ
+Yes
+—
+—
+When this report was emailed to the merchant — null if not sent
+promptVersion
+VARCHAR(50)
+No
+—
+NOT NULL
+Prompt template version
+modelUsed
+VARCHAR(100)
+No
+—
+NOT NULL
+OpenAI model identifier
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Generation timestamp
+Indexes — reports
+Index Name
+Columns
+Type
+Purpose
+rpt_store_type_idx
+storeId, type, periodEnd DESC
+BTREE
+Fetch latest report of each type
+rpt_store_created_idx
+storeId, createdAt DESC
+BTREE
+Report history list
+💬  ai_conversations  [AI]
+AI COO Chat message history and monthly usage tracking. Stores each message turn (user + assistant) for context injection into subsequent requests. Also tracks monthly message counts per store for plan limit enforcement.
+Column Name
+Data Type
+Null?
+Default
+Constraints
+Description
+id
+UUID
+No
+gen_random_uuid()
+PK
+Message record identifier
+storeId
+UUID
+No
+—
+FK -> stores.id
+Parent store
+sessionId
+UUID
+No
+—
+NOT NULL
+Groups messages in a single chat session
+role
+ENUM
+No
+—
+NOT NULL
+user | assistant
+content
+TEXT
+No
+—
+NOT NULL
+Message content
+billingMonth
+VARCHAR(7)
+No
+—
+NOT NULL
+YYYY-MM — used for monthly limit enforcement (e.g. 2024-03)
+confidenceLevel
+ENUM
+Yes
+—
+—
+very_high | high | moderate | low — for assistant messages only
+tokensUsed
+INTEGER
+Yes
+—
+—
+Token count for cost tracking — assistant messages only
+createdAt
+TIMESTAMPTZ
+No
+NOW()
+NOT NULL
+Message timestamp
+Indexes — ai_conversations
+Index Name
+Columns
+Type
+Purpose
+conv_store_month_idx
+storeId, billingMonth
+BTREE
+Monthly usage count for plan limit enforcement (SELECT COUNT(*))
+conv_session_idx
+sessionId, createdAt ASC
+BTREE
+Fetch ordered messages for a session (context injection)
+conv_store_created_idx
+storeId, createdAt DESC
+BTREE
+Recent chat history for a store
+Plan limit enforcement query: SELECT COUNT(*) FROM ai_conversations WHERE storeId = $1 AND billingMonth = $2 AND role = 'user'. Limits: Starter = 100, Growth = 500, Agency = 1,500.
+4. Data Retention Strategy
+Data retention is governed by the merchant's subscription plan. Retention limits apply to time-series metrics tables. Core tables (stores, users, products), intelligence tables (anomalies, recommendations), and the Business Timeline are retained indefinitely (subject to store active status).
+4.1 Retention Limits by Plan
+Table
+Starter (90 days)
+Growth (1 year)
+Agency (Unlimited)
+store_metrics_daily
+90 days
+365 days
+Unlimited
+product_metrics_daily
+90 days
+365 days
+Unlimited
+inventory_daily
+90 days
+365 days
+Unlimited
+traffic_daily
+90 days
+365 days
+Unlimited
+anomalies
+Unlimited
+Unlimited
+Unlimited
+anomaly_causes
+Unlimited
+Unlimited
+Unlimited
+recommendations
+Unlimited
+Unlimited
+Unlimited
+recommendation_outcomes
+Unlimited
+Unlimited
+Unlimited
+timeline_events
+Unlimited
+Unlimited
+Unlimited
+reports
+90 days
+365 days
+Unlimited
+ai_conversations
+90 days
+365 days
+Unlimited
+4.2 Retention Enforcement
+A nightly scheduled job (cron) identifies rows in time-series tables that exceed the store's plan retention window.
+Rows are hard-deleted from metrics tables after the retention window — they cannot be recovered.
+Anomalies, recommendations, and timeline events are NEVER purged as they constitute the operational memory moat.
+When a store upgrades from Starter to Growth, existing data within the new window is immediately accessible — no data migration required.
+When a store downgrades, data outside the new window is flagged for deletion at the next nightly purge cycle.
+4.3 Store Deletion & GDPR
+When a store uninstalls the app (app/uninstalled webhook), the store is marked active = false. Data is not immediately deleted.
+If a store requests full data deletion (GDPR erasure request), a manual process cascades DELETE across all tables for that storeId.
+The stores.accessToken and ga4RefreshToken columns are zeroed immediately on uninstall, regardless of data retention status.
+5. Historical Data Strategy
+5.1 90-Day Historical Import
+At onboarding, the system imports 90 days of historical data from the Shopify GraphQL API. This is the baseline for all anomaly detection, trend analysis, and health score calculation.
+Data Type
+Source
+Target Table(s)
+Granularity
+Orders / Revenue
+Shopify GraphQL: orders query (paginated)
+store_metrics_daily, product_metrics_daily
+Aggregated to daily totals
+Refunds
+Shopify GraphQL: refunds via orders query
+store_metrics_daily
+Aggregated to daily totals
+Inventory
+Shopify GraphQL: inventoryItems query
+inventory_daily
+Point-in-time snapshot per product
+Products
+Shopify GraphQL: products query
+products
+Full catalog sync
+GA4 Traffic
+GA4 Data API: runReport (if connected)
+traffic_daily
+Daily session and checkout data
+5.2 Baseline Calculation
+Anomaly detection requires a baseline to compare against. Baselines are calculated from historical data at import time and recalculated on each daily sync:
+Revenue baseline: 30-day rolling average daily revenue
+Conversion baseline: 30-day rolling average conversion rate
+Refund baseline: 30-day rolling average refund rate
+Traffic baseline: 30-day rolling average daily sessions (when GA4 connected)
+Inventory baseline: 14-day rolling average daily units sold per product
+Stores with fewer than 14 days of history at onboarding receive reduced confidence scores (Moderate or Low) until sufficient baseline data accumulates. The confidence engine accounts for this automatically.
+6. Reporting Data Strategy
+6.1 Dashboard Query Patterns
+The dashboard makes five primary data reads. Each maps to optimized queries against indexed columns:
+Dashboard Section
+Primary Query
+Target Table(s)
+Performance Target
+AI COO Status Card
+Latest health score, revenue at risk, active issue counts
+store_metrics_daily, anomalies
+< 200ms P95
+Today's Executive Brief
+Latest daily_briefing report
+reports
+< 100ms P95
+Priority Issues
+Top 10 active recommendations by priorityScore DESC
+recommendations, anomalies
+< 150ms P95
+Revenue Opportunities
+Open recommendations of type 'opportunity' (future)
+recommendations
+< 150ms P95
+AI COO Chat
+Last 10 messages for session context
+ai_conversations
+< 100ms P95
+6.2 AI COO Impact Score Calculation
+The AI COO Impact Score is a cumulative rollup across multiple tables. It is calculated on-demand and optionally cached in the reports table:
+-- Revenue Protected: sum of revenueImpact for all resolved anomalies
+SELECT SUM(a.revenueImpact)
+  FROM anomalies a
+  WHERE a.storeId = $1 AND a.resolvedAt IS NOT NULL;
+-- Revenue Opportunity Identified: sum of all recommendation revenueImpact
+SELECT SUM(r.revenueImpact)
+  FROM recommendations r
+  WHERE r.storeId = $1;
+-- Recommendations Completed: count of completed recommendations
+SELECT COUNT(*)
+  FROM recommendations r
+  WHERE r.storeId = $1 AND r.status = 'completed';
+-- Problems Resolved: count of resolved anomalies
+SELECT COUNT(*)
+  FROM anomalies a
+  WHERE a.storeId = $1 AND a.resolvedAt IS NOT NULL;
+7. Operational Memory Data Strategy
+7.1 What Operational Memory Is
+The Operational Memory System is described as the core moat in the Founder Specification. Architecturally, it is the combination of four never-deleted tables that accumulate the full operational history of each store:
+Table
+What It Remembers
+Used By AI For
+anomalies
+Every problem ever detected, its severity, timing, and revenue impact
+Pattern recognition: 'This type of drop has happened before in Q4'
+anomaly_causes
+Every cause explanation ever generated, with prompt version tracking
+Cause consistency: surface recurring causes across similar anomalies
+recommendations
+Every recommendation ever made, with full content and lifecycle status
+Recommendation history: 'You have seen this recommendation before'
+recommendation_outcomes
+Measured business impact of every completed recommendation
+Outcome learning: calibrate future recommendation confidence based on past results
+timeline_events
+Every significant operational event in chronological order
+Context injection: provide AI with recent store history narrative
+7.2 Context Injection Query
+Before every AI call, the following context retrieval query is executed to inject relevant operational history into the prompt:
+-- Step 1: Last 3 anomalies of the same type (for pattern context)
+SELECT a.type, a.metricValue, a.baselineValue, a.triggeredAt,
+       a.resolvedAt, ac.causeText
+  FROM anomalies a
+  LEFT JOIN anomaly_causes ac ON ac.anomalyId = a.id
+  WHERE a.storeId = $1 AND a.type = $2
+  ORDER BY a.triggeredAt DESC
+  LIMIT 3;
+-- Step 2: Last 5 recommendations for this anomaly type and their outcomes
+SELECT r.problem, r.action, r.status, r.completedAt,
+       ro.anomalyResolved, ro.revenueImpactActual
+  FROM recommendations r
+  LEFT JOIN recommendation_outcomes ro ON ro.recommendationId = r.id
+  JOIN anomalies a ON a.id = r.anomalyId
+  WHERE r.storeId = $1 AND a.type = $2
+  ORDER BY r.createdAt DESC
+  LIMIT 5;
+-- Step 3: Recent Business Timeline (last 30 days)
+SELECT eventType, occurredAt, title, revenueImpact
+  FROM timeline_events
+  WHERE storeId = $1
+    AND occurredAt >= NOW() - INTERVAL '30 days'
+  ORDER BY occurredAt DESC
+  LIMIT 20;
+7.3 Proprietary Intelligence Asset
+The recommendation_outcomes table grows as merchants complete recommendations. This dataset enables future capabilities described in the Founder Specification:
+Aggregate outcome accuracy measurement: what percentage of recommendations lead to anomaly resolution
+Revenue impact accuracy: estimated vs actual impact differential over time
+Cross-store pattern learning: which recommendation types have the highest completion and resolution rates by store type or revenue tier
+These cross-store analytics capabilities are post-V1 roadmap items. In V1, recommendation_outcomes data is used only for per-store outcome display and AI COO Impact Score calculation. No cross-store data access or ML training pipeline is built in V1.
+8. Prisma Schema Reference
+The following Prisma schema is the authoritative implementation reference. It reflects all table definitions, relationships, enums, and index declarations specified in this document.
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+enum SubscriptionPlan { starter growth agency }
+enum SubscriptionStatus { trialing active past_due cancelled }
+enum AnomalyType {
+  revenue_drop conversion_drop inventory_risk
+  refund_spike traffic_drop checkout_drop
+}
+enum AnomalySeverity { critical warning info }
+enum ConfidenceLevel { very_high high moderate low }
+enum RecommendationStatus { pending accepted ignored completed }
+enum TimelineEventType {
+  revenue_drop_detected revenue_recovered conversion_drop_detected
+  inventory_risk_detected inventory_risk_resolved refund_spike_detected
+  traffic_drop_detected checkout_drop_detected
+  recommendation_created recommendation_accepted recommendation_ignored recommendation_completed
+  onboarding_complete ga4_connected ga4_disconnected historical_import_complete
+}
+enum ReportType { daily_briefing weekly_report monthly_review }
+enum UserRole { owner member }
+enum ConversationRole { user assistant }
+enum ProductStatus { active archived draft }
+model Store {
+  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shopifyDomain        String            @unique @db.VarChar(255)
+  shopifyId            String            @unique @db.VarChar(100)
+  accessToken          String            // encrypted
+  storeName            String            @db.VarChar(255)
+  currency             String            @default("USD") @db.VarChar(10)
+  timezone             String            @default("UTC") @db.VarChar(100)
+  subscriptionPlan     SubscriptionPlan  @default(starter)
+  subscriptionStatus   SubscriptionStatus @default(trialing)
+  trialEndsAt          DateTime?         @db.Timestamptz
+  ga4PropertyId        String?           @db.VarChar(100)
+  ga4RefreshToken      String?           // encrypted
+  ga4ConnectedAt       DateTime?         @db.Timestamptz
+  briefingTime         String            @default("08:00") @db.VarChar(5)
+  briefingTimezone     String            @default("UTC") @db.VarChar(100)
+  active               Boolean           @default(true)
+  historicalImportDone Boolean           @default(false)
+  lastOrdersSyncAt     DateTime?         @db.Timestamptz
+  lastInventorySyncAt  DateTime?         @db.Timestamptz
+  lastRefundsSyncAt    DateTime?         @db.Timestamptz
+  lastProductsSyncAt   DateTime?         @db.Timestamptz
+  lastGa4SyncAt        DateTime?         @db.Timestamptz
+  createdAt            DateTime          @default(now()) @db.Timestamptz
+  updatedAt            DateTime          @updatedAt @db.Timestamptz
+  users                User[]
+  products             Product[]
+  storeMetricsDaily    StoreMetricsDaily[]
+  trafficDaily         TrafficDaily[]
+  anomalies            Anomaly[]
+  timelineEvents       TimelineEvent[]
+  reports              Report[]
+  aiConversations      AiConversation[]
+  @@index([active, subscriptionPlan])
+  @@index([briefingTime])
+}
+// ... (see full schema in repository)
+9. Migration & Versioning Strategy
+9.1 Migration Approach
+Tool
+Prisma Migrate (prisma migrate dev / prisma migrate deploy)
+Storage
+prisma/migrations/ directory — committed to version control
+Naming
+Timestamp-prefixed sequential names: 20240315_add_ga4_fields
+Production
+prisma migrate deploy (no interactive prompts — CI/CD safe)
+Rollback
+Prisma does not auto-rollback. Write explicit down-migration SQL for critical schema changes.
+Zero-downtime
+Additive changes (add column, add index) are safe. Destructive changes require multi-step migration with compatibility period.
+9.2 Safe vs Dangerous Migration Patterns
+Operation
+Safety
+Strategy
+Add column (nullable)
+Safe
+Single migration — deploy anytime
+Add column (NOT NULL)
+Careful
+Add as nullable, backfill, then add NOT NULL constraint in second migration
+Add index
+Safe
+Use CREATE INDEX CONCURRENTLY to avoid table locks
+Rename column
+Dangerous
+Add new column + backfill + update code + drop old column (4-step process)
+Drop column
+Dangerous
+Deprecate in code first, then drop in later migration after full deploy
+Change enum values
+Careful
+Add new value (safe), mark old as deprecated, remove in future migration
+Change column type
+Dangerous
+New column + migration + verify + drop old

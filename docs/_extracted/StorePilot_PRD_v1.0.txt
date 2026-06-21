@@ -1,0 +1,871 @@
+STOREPILOT
+AI Operational Intelligence Platform for Shopify Stores
+PRODUCT REQUIREMENTS DOCUMENT
+Version 1.0  |  Based on Founder Specification v1.0
+Table of Contents
+1. Executive Summary
+StorePilot is an AI-powered operational intelligence platform built exclusively for Shopify merchants. It functions as an AI Chief Operating Officer — continuously monitoring store performance, detecting operational issues before they become revenue-impacting problems, and delivering actionable recommendations rather than raw data.
+Unlike conventional analytics dashboards that require merchants to interpret metrics themselves, StorePilot tells merchants what is wrong, why it happened, and what to do next. The platform is designed for founder-led ecommerce brands and small teams generating between $10,000 and $500,000 per month on Shopify.
+This Product Requirements Document defines the complete functional and non-functional requirements for StorePilot V1, derived exclusively from the Founder Specification v1.0.
+Product Name
+StorePilot
+Document Type
+Product Requirements Document (PRD)
+Version
+1.0
+Source
+Founder Specification v1.0
+Target Platform
+Shopify (exclusive for first 12 months)
+Target Segment
+$10K–$500K/month Shopify merchants
+Onboarding Target
+Under 2 minutes
+Trial Period
+14-Day Free Trial, no credit card required
+2. Product Vision & Goals
+2.1 Product Vision
+StorePilot is the operational intelligence layer for ecommerce businesses — an AI COO that tells merchants what is wrong, why it happened, and what to do next.
+StorePilot is explicitly not an analytics platform and not a reporting platform. It is an operational intelligence platform. The distinction is fundamental: where dashboards present data for human interpretation, StorePilot interprets the data and delivers decisions-ready intelligence.
+2.2 Primary Product Goals
+Goal 1
+Eliminate the need for merchants to manually monitor dashboards to detect operational issues
+Goal 2
+Translate every detected anomaly into a business-language recommendation with estimated revenue impact
+Goal 3
+Build a persistent operational memory per store, making StorePilot smarter over time
+Goal 4
+Deliver measurable, trackable ROI so merchants can quantify the platform's value
+Goal 5
+Complete onboarding in under 2 minutes to minimize time-to-value
+2.3 Primary USP
+Stop Checking Dashboards. Your AI COO Tells You What's Wrong, Why It Happened, And What To Do Next.
+2.4 Secondary USP
+Detect revenue leaks, inventory risks, conversion drops, refund spikes, and growth opportunities before they impact your business.
+3. Core Product Philosophy
+Three non-negotiable rules govern all product decisions, AI behavior, and feature design in StorePilot.
+Rule 1 — AI Explains, Not Calculates
+The AI layer is responsible for explaining, interpreting, and communicating. All numerical calculations — revenue impact, health scores, anomaly thresholds — are performed by deterministic business logic. The AI must never generate or infer numbers independently.
+Rule 2 — Every Recommendation Must Be Complete
+No recommendation may be surfaced to a merchant unless it includes all five required components:
+Problem — a clear description of the detected issue
+Likely Cause — the AI's explanation of why this is happening
+Estimated Revenue Impact — a monetary figure calculated by the Revenue Impact Engine
+Recommended Action — a specific, actionable step the merchant can take
+Confidence Score — a calibrated confidence level (Very High / High / Moderate / Low)
+Rule 3 — Every Insight Must Be Tied to Business Outcomes
+StorePilot does not surface vanity metrics. Every insight must connect to one of the following measurable business outcomes:
+Revenue
+Profitability
+Inventory performance
+Conversion rate
+Operational efficiency
+4. Target Market & User Personas
+4.1 Target Market
+Platform
+Shopify (exclusive)
+Revenue Range
+$10,000 – $500,000 / month
+Exclusivity Period
+12 months Shopify-only
+4.2 Excluded Markets (V1)
+The following platforms and seller types are explicitly out of scope for V1:
+WooCommerce
+Magento
+BigCommerce
+Amazon sellers
+Etsy sellers
+Walmart sellers
+4.3 User Personas
+Persona 1 — The Solo Founder
+Attribute
+Detail
+Name
+Alex — DTC Founder
+Store Size
+$15K–$80K/month Shopify store
+Team Size
+0–2 people
+Core Pain
+Has no time to check dashboards daily; discovers problems only after they've cost revenue
+Goal
+Know what's wrong the moment it happens without spending time on data analysis
+Plan Fit
+Starter ($49/month)
+Persona 2 — The Growing Ecommerce Brand
+Attribute
+Detail
+Name
+Sarah — Head of Ecommerce
+Store Size
+$100K–$350K/month Shopify store
+Team Size
+3–8 people
+Core Pain
+Operational issues slip through gaps between team members; recommendations are not tracked or measured
+Goal
+Centralized operational intelligence with tracked recommendations and outcome measurement
+Plan Fit
+Growth ($99/month)
+Persona 3 — The Ecommerce Agency
+Attribute
+Detail
+Name
+Marcus — Agency Owner
+Store Size
+Managing 2–5 Shopify client stores
+Team Size
+5–20 agency staff
+Core Pain
+No single view across multiple client stores; hard to demonstrate operational ROI to clients
+Goal
+Multi-store monitoring with client-facing reporting and impact scoring
+Plan Fit
+Agency ($199/month)
+5. User Stories
+The following user stories define the core behaviors the platform must support. All stories are derived from the Founder Specification.
+5.1 Onboarding
+ID
+As a...
+I want to...
+So that...
+US-01
+a Shopify merchant
+connect my store and complete setup in under 2 minutes
+I can start receiving operational intelligence immediately
+US-02
+a merchant
+connect Google Analytics 4 optionally during onboarding
+I can unlock traffic and checkout anomaly detection
+US-03
+a merchant
+have 90 days of historical data imported automatically
+my first COO report has meaningful context from day one
+5.2 Operational Intelligence
+ID
+As a...
+I want to...
+So that...
+US-04
+a merchant
+receive a daily AI briefing at a time I choose
+I start each day knowing my store's operational status without checking dashboards
+US-05
+a merchant
+see my Store Health Score on the dashboard
+I can understand overall store health at a glance
+US-06
+a merchant
+see my Revenue At Risk figure
+I understand how much revenue I am currently losing due to operational issues
+US-07
+a merchant
+see my Revenue Opportunity figure
+I know how much additional revenue is available through improvements
+US-08
+a merchant
+receive alerts only for high-impact issues
+I am not overwhelmed by alert fatigue
+5.3 Recommendations
+ID
+As a...
+I want to...
+So that...
+US-09
+a merchant
+see each recommendation with Problem, Cause, Impact, Action, and Confidence
+I have all the information I need to act without further analysis
+US-10
+a merchant
+accept, ignore, or mark a recommendation as completed
+I can track which recommendations I am acting on
+US-11
+a merchant
+see whether a completed recommendation improved my business metrics
+I can measure the ROI of acting on AI recommendations
+5.4 AI COO Chat
+ID
+As a...
+I want to...
+So that...
+US-12
+a merchant
+ask the AI why my revenue is down
+I get an explanation with context from my store's operational history
+US-13
+a merchant
+ask what I should focus on today
+I get a prioritized action list without reviewing multiple dashboards
+US-14
+a merchant
+receive confidence levels with every AI chat response
+I can calibrate how much to trust each insight
+5.5 Reporting & History
+ID
+As a...
+I want to...
+So that...
+US-15
+a merchant
+receive a weekly COO report every Monday
+I have an executive-level weekly business summary
+US-16
+a merchant
+receive a monthly executive review
+I can assess StorePilot's ROI and my store's trajectory each month
+US-17
+a merchant
+view my Business Timeline
+I can see the chronological history of issues, recommendations, and outcomes for my store
+US-18
+a merchant
+see my AI COO Impact Score
+I can quantify the total business value StorePilot has generated
+5.6 Multi-Store (Agency)
+ID
+As a...
+I want to...
+So that...
+US-19
+an agency operator
+manage up to 5 stores from a single account
+I can monitor all client stores without switching accounts
+US-20
+an agency operator
+access agency-level reporting
+I can share operational performance summaries with clients
+6. Functional Requirements
+Priority levels: P1 = Must Have (launch blocker) | P2 = Should Have | P3 = Nice to Have
+6.1 Store Health Score
+ID
+Requirement
+Priority
+FR-01
+System calculates a Store Health Score (0–100) from five weighted dimensions
+P1
+FR-02
+Revenue Health contributes 30% of the score
+P1
+FR-03
+Conversion Health contributes 25% of the score
+P1
+FR-04
+Inventory Health contributes 20% of the score
+P1
+FR-05
+Refund Health contributes 15% of the score
+P1
+FR-06
+Traffic Health contributes 10% of the score (requires GA4)
+P1
+FR-07
+Score is recalculated on each data sync cycle
+P1
+6.2 Anomaly Detection Engine
+ID
+Requirement
+Priority
+FR-08
+System detects a Revenue Drop when revenue declines 15% or more vs. comparison period
+P1
+FR-09
+System detects a Conversion Drop when conversion rate declines 10% or more
+P1
+FR-10
+System detects Inventory Risk when estimated days of stock remaining falls to 14 days or fewer
+P1
+FR-11
+System detects a Refund Spike when refund rate increases 50% or more
+P1
+FR-12
+System detects a Traffic Drop when traffic declines 20% or more (requires GA4)
+P1
+FR-13
+System detects a Checkout Drop when checkout completion rate declines significantly (requires GA4)
+P1
+FR-14
+Each detected anomaly generates a corresponding entry in the Issues Center
+P1
+FR-15
+Each detected anomaly generates a corresponding Business Timeline event
+P1
+6.3 Revenue Impact Engine
+ID
+Requirement
+Priority
+FR-16
+System translates every detected anomaly into an estimated monthly revenue impact in monetary terms
+P1
+FR-17
+System calculates aggregate Revenue At Risk figure across all active issues
+P1
+FR-18
+System calculates aggregate Revenue Opportunity figure across all identified improvements
+P1
+FR-19
+All monetary impact figures are produced by deterministic business logic, not AI inference
+P1
+6.4 Recommendation Engine
+ID
+Requirement
+Priority
+FR-20
+Every recommendation includes: Problem, Cause, Impact, Action, Confidence, and Priority
+P1
+FR-21
+Recommendation priority is calculated as: Revenue Impact x Confidence x Urgency
+P1
+FR-22
+Recommendations are ranked by priority score in the Priority Issues dashboard section
+P1
+FR-23
+Each recommendation carries a Confidence Level: Very High (90–100), High (75–89), Moderate (60–74), or Low (below 60)
+P1
+FR-24
+AI must not claim certainty when confidence is Low
+P1
+6.5 Recommendation Tracking & Outcomes
+ID
+Requirement
+Priority
+FR-25
+Merchants can set recommendation status: Pending, Accepted, Ignored, Completed
+P1
+FR-26
+System tracks actual business impact after a recommendation is marked Completed
+P1
+FR-27
+Outcome data is stored and used to build the Operational Memory dataset
+P1
+6.6 Daily COO Briefing
+ID
+Requirement
+Priority
+FR-28
+System generates a daily AI briefing containing: Health Score, Revenue At Risk, Revenue Opportunity, Priority Issues, Recommended Actions
+P1
+FR-29
+Merchant can configure daily delivery time
+P1
+FR-30
+Briefing is delivered via email (Resend)
+P1
+6.7 Weekly COO Report
+ID
+Requirement
+Priority
+FR-31
+System generates a weekly executive report every Monday
+P1
+FR-32
+Report contains: Revenue trends, Operational performance, Recommendations, Opportunities, Risks
+P1
+FR-33
+Weekly COO Report is available on Growth and Agency plans only
+P1
+6.8 AI COO Chat
+ID
+Requirement
+Priority
+FR-34
+Dashboard includes a persistent AI chat assistant
+P1
+FR-35
+AI chat responses include: Explanation, Business reasoning, Recommended actions, Confidence level
+P1
+FR-36
+Chat is context-aware, leveraging store's operational history
+P2
+FR-37
+Monthly chat message limits enforced per plan: Starter 100, Growth 500, Agency 1500
+P1
+6.9 Business Timeline
+ID
+Requirement
+Priority
+FR-38
+System maintains a chronological operational history for each store
+P1
+FR-39
+Timeline events include: Revenue drops, Inventory issues, Recommendation creation, Recommendation completion, Revenue recovery
+P1
+FR-40
+Business Timeline is accessible from the dashboard
+P1
+FR-41
+AI leverages timeline data when generating explanations and recommendations
+P2
+6.10 AI COO Impact Score
+ID
+Requirement
+Priority
+FR-42
+Dashboard displays cumulative AI COO Impact Score showing: Revenue Protected, Revenue Opportunity Identified, Recommendations Completed, Problems Resolved
+P1
+6.11 Onboarding Flow
+ID
+Requirement
+Priority
+FR-43
+Onboarding completes in 7 steps: Install, Connect Shopify, Optional GA4, Import 90d history, Initial Audit, First COO Report, Dashboard
+P1
+FR-44
+Full onboarding completes in under 2 minutes for a merchant connecting Shopify only
+P1
+FR-45
+90 days of historical data is imported during onboarding
+P1
+6.12 Data Sync
+ID
+Requirement
+Priority
+FR-46
+Revenue, Inventory, and Refund data sync hourly
+P1
+FR-47
+Product data syncs every 6 hours
+P1
+FR-48
+Google Analytics data syncs every 6 hours (when GA4 connected)
+P1
+FR-49
+Customer metrics sync daily
+P1
+FR-50
+Shopify webhooks are the primary sync mechanism with scheduled jobs as backup
+P1
+6.13 Multi-Store (Agency)
+ID
+Requirement
+Priority
+FR-51
+Agency plan supports up to 5 stores per account
+P1
+FR-52
+Multi-store management dashboard available on Agency plan
+P1
+FR-53
+Agency reporting available on Agency plan
+P1
+7. Non-Functional Requirements
+Category
+Requirement
+Target
+Performance
+Dashboard initial load time
+Under 3 seconds
+Performance
+Anomaly detection lag after data sync
+Under 5 minutes
+Performance
+Onboarding completion time
+Under 2 minutes
+Reliability
+Platform uptime SLA
+99.9% uptime
+Data Sync
+Hourly sync job success rate
+99%+ completion rate
+Scalability
+Architecture supports growing merchant base
+Vercel + Supabase auto-scaling
+Security
+Authentication method
+Shopify OAuth 2.0
+Security
+Data storage encryption
+Encrypted at rest and in transit
+AI Accuracy
+Confidence levels must reflect actual signal quality
+AI cannot assert High when data is insufficient
+Usability
+All anomalies explained in plain business language
+No raw metric jargon in merchant-facing output
+Email
+Transactional email delivery
+Resend provider, delivered within 5 minutes of trigger
+History
+Starter plan data retention
+90 days
+History
+Growth plan data retention
+1 year
+History
+Agency plan data retention
+Unlimited
+8. Dashboard Specifications
+The StorePilot dashboard is organized into five distinct sections, each serving a specific intelligence layer.
+8.1 Section 1 — AI COO Status Card
+Primary at-a-glance operational status. Displays:
+Store Health Score (0–100)
+Revenue At Risk (monthly monetary figure)
+Revenue Opportunity (monthly monetary figure)
+Count of Critical Issues
+Count of Warning Issues
+8.2 Section 2 — Today's Executive Brief
+The daily AI-generated summary rendered inline. Provides the equivalent of a daily morning briefing from a COO.
+8.3 Section 3 — Priority Issues
+Ranked list of active operational issues, ordered by priority score (Revenue Impact x Confidence x Urgency). Each issue card displays:
+Problem description
+Revenue Impact (monetary)
+Confidence Level
+Recommended Action
+8.4 Section 4 — Revenue Opportunities
+Identified growth opportunities ranked by estimated revenue gain. Each card displays:
+Opportunity description
+Estimated Revenue Gain (monthly)
+Recommended Action
+8.5 Section 5 — AI COO Chat
+Persistent AI chat assistant accessible from the dashboard. Context-aware and linked to the store's operational history. Provides explanations, business reasoning, recommended actions, and confidence levels in every response.
+9. AI Features
+9.1 AI Architecture Principle
+AI explains. AI does not calculate. All numerical outputs are produced by deterministic business logic. The AI layer interprets, frames, and communicates those outputs in business language.
+9.2 AI-Powered Features
+Feature
+AI Role
+Deterministic Role
+Daily COO Briefing
+Generates narrative summary in business language
+Calculates all scores and impact figures
+Weekly COO Report
+Writes executive commentary and recommendations
+Aggregates trend data and metrics
+AI COO Chat
+Responds to merchant queries with context-aware explanations
+None — chat is AI-driven interpretation only
+Recommendations
+Explains cause, writes action, assigns business framing
+Calculates priority score, revenue impact, confidence
+Anomaly Explanation
+Provides likely cause narrative per anomaly
+Triggers anomaly based on hard thresholds
+Operational Memory
+Leverages historical patterns in explanations
+Stores all events, outcomes, and timelines
+9.3 Confidence Engine
+Confidence Level
+Score Range
+Behavioral Constraint
+Very High
+90–100
+AI may assert conclusions with confidence
+High
+75–89
+AI may assert conclusions with appropriate framing
+Moderate
+60–74
+AI must qualify conclusions
+Low
+Below 60
+AI must not claim certainty; must flag limited data
+9.4 Operational Memory System
+The Operational Memory System is a core product moat. It builds a persistent, per-store intelligence layer that records:
+Problems detected
+Identified causes
+Recommendations generated
+Actions taken by the merchant
+Measured outcomes
+Business events
+The AI leverages this history to generate increasingly contextual explanations and recommendations over time. The accumulated outcome data also becomes a future proprietary intelligence asset across the platform.
+10. Communication System
+StorePilot's communication system is designed to deliver maximum signal with minimum noise. Alert fatigue is an explicit design risk to be avoided.
+Communication Type
+Frequency
+Content
+Trigger
+Daily COO Briefing
+Daily (merchant-selected time)
+Health Score, Revenue At Risk, Revenue Opportunity, Priority Issues, Actions
+Scheduled
+Critical Alerts
+As needed (high-impact only)
+Single high-impact operational issue
+Anomaly above critical threshold
+Weekly COO Report
+Every Monday
+Revenue trends, Operational performance, Recommendations, Opportunities, Risks
+Scheduled (Growth & Agency plans)
+Monthly Executive Review
+Monthly
+ROI summary, Business impact, StorePilot value generated
+Scheduled
+Critical design requirement: Critical Alerts must be triggered for high-impact issues only. Merchants must never experience alert fatigue from StorePilot notifications.
+11. Integrations
+11.1 Required Integration
+Integration
+Type
+Method
+Purpose
+Shopify
+Required
+GraphQL Admin API + OAuth 2.0
+Core data source: orders, inventory, products, refunds, customers
+11.2 Optional Integration
+Integration
+Type
+Method
+Unlocks
+Google Analytics 4
+Optional
+GA4 Data API
+Traffic Drop detection, Checkout Drop detection, Traffic Health in Store Health Score
+11.3 Future Roadmap Integrations (Not V1)
+The following integrations are explicitly excluded from V1 and must not be scoped or designed into the initial build:
+Google Search Console
+Meta Ads
+Google Ads
+Klaviyo
+Zendesk
+Gorgias
+12. Onboarding Flow
+The onboarding experience must complete in under 2 minutes. Every step must be automated where possible to minimize merchant friction.
+Step
+Action
+Automated?
+Notes
+1
+Install App
+Merchant action
+Via Shopify App Store
+2
+Connect Shopify
+Merchant action
+OAuth 2.0 authentication
+3
+Connect Google Analytics 4
+Merchant action (optional)
+Skip enabled; unlocks additional anomaly detection
+4
+Import 90 Days Historical Data
+Automated
+Background import from Shopify API
+5
+Run Initial Audit
+Automated
+First-pass anomaly detection on historical data
+6
+Generate First COO Report
+Automated
+AI generates first executive brief
+7
+Display Dashboard
+Automated
+Merchant enters live dashboard
+Target: Total onboarding from app install to live dashboard in under 2 minutes (Shopify-only connection, GA4 skipped).
+13. Pricing Plans
+13.1 Trial Strategy
+Free Trial Duration
+14 days
+Permanent Free Plan
+None
+Credit Card at Signup
+Not required
+13.2 Plan Comparison
+Starter
+$49 / month
+Growth
+$99 / month
+Agency
+$199 / month
+1 Store
+Everything in Starter
+5 Stores
+Daily COO Briefing
+Revenue Opportunity Engine
+Multi-Store Management
+Revenue Leak Detection
+Recommendation Tracking
+Agency Reporting
+Inventory Monitoring
+Operational Memory
+Team Access (future)
+Conversion Monitoring
+Weekly COO Reports
+1,500 AI Chat Msgs/Month
+Refund Monitoring
+500 AI Chat Msgs/Month
+Unlimited History
+Business Timeline
+1-Year History
+100 AI Chat Msgs/Month
+90-Day History
+14. Success Metrics
+StorePilot succeeds when merchants can answer these five questions without manually analyzing dashboards:
+Q1
+What happened?
+Q2
+Why did it happen?
+Q3
+What should I do next?
+Q4
+Did previous recommendations work?
+Q5
+What changed over time?
+14.1 Quantitative Success Metrics
+Metric
+Target
+Measurement Method
+Onboarding completion time
+Under 2 minutes
+Time from app install to dashboard display
+Daily briefing open rate
+> 40%
+Email delivery analytics via Resend
+Recommendation acceptance
+> 30% acceptance rate
+Recommendation status tracking in DB
+Recommendation completion
+> 20% completion rate
+Recommendation outcome system
+Revenue impact tracked
+Measurable per merchant
+AI COO Impact Score cumulative total
+Anomaly detection speed
+Within 1 hourly cycle
+Time from data sync to issue creation
+Trial-to-paid conversion
+Benchmark at 14-day mark
+Subscription system conversion data
+Health score accuracy
+Reflects actual issues
+Correlation between score drops and issue triggers
+15. Acceptance Criteria
+V1 is ready for launch when all P1 Acceptance Criteria below are met.
+Feature
+Acceptance Criteria
+Onboarding
+A new merchant installs the app, connects Shopify, and reaches the live dashboard in under 2 minutes. 90 days of historical data is imported automatically.
+Store Health Score
+Score is calculated correctly using the 5-dimension weighted formula. Score updates after every data sync.
+Anomaly Detection
+All 4 core anomalies (Revenue Drop, Conversion Drop, Inventory Risk, Refund Spike) trigger correctly at defined thresholds on test data.
+GA4 Anomalies
+Traffic Drop and Checkout Drop anomalies trigger correctly when GA4 is connected. Neither triggers without GA4.
+Revenue At Risk
+Monetary figure is calculated by deterministic logic, not AI. Displayed on dashboard. Updates hourly.
+Recommendations
+No recommendation is surfaced without all 5 components: Problem, Cause, Impact, Action, Confidence.
+Confidence Engine
+AI does not assert certainty when confidence is Low. Confidence level is displayed on every recommendation and chat response.
+Recommendation Tracking
+Status can be set to Pending, Accepted, Ignored, Completed. Status persists across sessions.
+Business Timeline
+Timeline shows chronological events including revenue drops, inventory alerts, recommendation creation, and completion events.
+Daily COO Briefing
+Email is delivered daily at the merchant-configured time containing all required components.
+Weekly COO Report
+Email is delivered every Monday for Growth and Agency plan users.
+AI COO Chat
+Chat responds with explanation, business reasoning, recommended action, and confidence. Monthly message limits are enforced per plan.
+AI COO Impact Score
+Dashboard displays cumulative Revenue Protected, Revenue Opportunity Identified, Recommendations Completed, and Problems Resolved.
+Multi-Store (Agency)
+Agency plan account can connect and monitor up to 5 stores. Agency reporting is accessible.
+Plan Enforcement
+Chat message limits are enforced. Weekly COO Reports are gated to Growth and Agency. History limits match plan tier.
+Data Sync
+Revenue, inventory, and refund data syncs at least hourly. Webhook primary, scheduled job fallback.
+16. Assumptions
+The following assumptions underpin the V1 requirements. If any assumption proves false, affected requirements must be reassessed.
+ID
+Assumption
+A-01
+Shopify's GraphQL Admin API provides sufficient order, inventory, product, and refund data to power all core anomaly detections without additional data sources
+A-02
+90 days of historical data is sufficient to establish reliable baselines for anomaly detection thresholds
+A-03
+Merchants in the $10K–$500K/month range are willing to pay $49–$199/month for automated operational intelligence
+A-04
+A 14-day free trial is sufficient to demonstrate product value and drive trial-to-paid conversion
+A-05
+GA4 connection can be completed by merchants without developer assistance
+A-06
+Vercel and Supabase infrastructure can scale to support the initial merchant base without custom infrastructure
+A-07
+The low-cost OpenAI model selected provides sufficient output quality for business-language recommendations and briefings
+A-08
+Shopify webhooks are reliable enough to serve as the primary sync mechanism with scheduled jobs as adequate fallback
+17. Risks
+Risk
+Impact
+Likelihood
+Mitigation
+AI output quality below expectations
+High
+Medium
+Implement rigorous prompt engineering; test all briefings and recommendations against real store data before launch
+Shopify API rate limiting impacts sync reliability
+High
+Medium
+Implement webhook-first architecture with smart retry logic and backoff on scheduled jobs
+Onboarding exceeds 2-minute target
+Medium
+Medium
+Background all API calls post-OAuth; defer non-critical imports; track funnel completion times in analytics
+Alert fatigue from over-notification
+High
+Low
+Enforce strict threshold gates; require High or Very High confidence before triggering critical alerts
+Merchants unable to interpret confidence levels
+Medium
+Medium
+Use plain-language labels (Very High/High/Moderate/Low), never numeric scores, in merchant-facing UI
+Recommendation acceptance rate too low to generate outcome data
+Medium
+Medium
+Optimize recommendation clarity; A/B test action language; track acceptance rate from day one
+OpenAI cost scaling with merchant base
+Medium
+Low
+Monitor per-merchant AI token usage; enforce monthly chat limits by plan tier
+Competitor launches similar product during V1 build
+Low
+Low
+Accelerate launch timeline; focus on operational memory moat as primary differentiator
+18. Future Roadmap (Post-V1)
+The following items are explicitly excluded from V1 but are documented here as confirmed future roadmap candidates, per the Founder Specification.
+None of the items below may be included in V1 scope, designed into V1 architecture as features, or referenced in V1 merchant-facing communications.
+18.1 Future Platform Integrations
+Integration
+Category
+Google Search Console
+Traffic / SEO
+Meta Ads
+Paid Advertising
+Google Ads
+Paid Advertising
+Klaviyo
+Email Marketing / CRM
+Zendesk
+Customer Support
+Gorgias
+Customer Support
+18.2 Future Feature Roadmap
+Feature
+Category
+WooCommerce Support
+Platform Expansion
+Google Search Console Integration
+Integration
+Meta Ads Integration
+Integration
+Google Ads Integration
+Integration
+Klaviyo Integration
+Integration
+Landing Page AI Analysis
+AI Feature
+Theme AI Analysis
+AI Feature
+App Impact Analysis
+AI Feature
+Autonomous Agents
+AI Automation
+Auto-Fix Actions
+AI Automation
+Competitor Intelligence
+Intelligence Layer
+Multi-Platform Support
+Platform Expansion
+Team Access
+Agency / Collaboration
