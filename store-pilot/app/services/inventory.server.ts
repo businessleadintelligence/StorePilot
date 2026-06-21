@@ -171,14 +171,20 @@ export async function findProductsByInventoryItemId(
   });
 }
 
-export async function fetchTotalAvailableForInventoryItem(
+interface InventoryItemInventoryState {
+  totalAvailable: number | null;
+  tracked: boolean | null;
+}
+
+async function fetchInventoryItemInventoryState(
   admin: StoreSyncAdminClient,
   shopifyInventoryItemId: string,
   context: { shop: string; storeId: string },
-): Promise<number | null> {
+): Promise<InventoryItemInventoryState> {
   let cursor: string | null = null;
   let totalAvailable = 0;
   let hasMore = true;
+  let tracked: boolean | null = null;
 
   logInventoryWebhook("info", "Recomputing total inventory via GraphQL", {
     shop: context.shop,
@@ -205,7 +211,11 @@ export async function fetchTotalAvailableForInventoryItem(
 
     const inventoryItem = body.data?.inventoryItem;
     if (!inventoryItem?.id) {
-      return null;
+      return { totalAvailable: null, tracked: null };
+    }
+
+    if (tracked === null) {
+      tracked = inventoryItem.tracked ?? null;
     }
 
     const nodes = inventoryItem.inventoryLevels?.nodes ?? [];
@@ -225,7 +235,36 @@ export async function fetchTotalAvailableForInventoryItem(
     }
   }
 
-  return totalAvailable;
+  return { totalAvailable, tracked };
+}
+
+export async function fetchTotalAvailableForInventoryItem(
+  admin: StoreSyncAdminClient,
+  shopifyInventoryItemId: string,
+  context: { shop: string; storeId: string },
+): Promise<number | null> {
+  const state = await fetchInventoryItemInventoryState(
+    admin,
+    shopifyInventoryItemId,
+    context,
+  );
+  return state.totalAvailable;
+}
+
+async function selfHealInventoryTracked(
+  storeId: string,
+  shopifyInventoryItemId: string,
+): Promise<number> {
+  const result = await prisma.product.updateMany({
+    where: {
+      storeId,
+      shopifyInventoryItemId,
+      inventoryTracked: false,
+    },
+    data: { inventoryTracked: true },
+  });
+
+  return result.count;
 }
 
 export async function updateProductInventoryQuantity(
@@ -466,8 +505,13 @@ export async function handleInventoryLevelUpdateWebhook(
       updated: products.length,
     });
 
-    const trackedProducts = products.filter((product) => product.inventoryTracked);
-    if (trackedProducts.length === 0) {
+    const inventoryState = await fetchInventoryItemInventoryState(
+      admin,
+      shopifyInventoryItemId,
+      { shop: input.shop, storeId: store.storeId },
+    );
+
+    if (inventoryState.tracked !== true) {
       return completeWebhookSkip(
         input,
         store.storeId,
@@ -479,13 +523,25 @@ export async function handleInventoryLevelUpdateWebhook(
       );
     }
 
-    const totalAvailable = await fetchTotalAvailableForInventoryItem(
-      admin,
+    const healedCount = await selfHealInventoryTracked(
+      store.storeId,
       shopifyInventoryItemId,
-      { shop: input.shop, storeId: store.storeId },
     );
 
-    if (totalAvailable === null) {
+    if (healedCount > 0) {
+      logInventoryWebhook("info", "Inventory tracked flag self-healed", {
+        shop: input.shop,
+        storeId: store.storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "variant_resolved",
+        shopifyInventoryItemId,
+        reason: "inventory_tracked_self_healed",
+        updated: healedCount,
+      });
+    }
+
+    if (inventoryState.totalAvailable === null) {
       return completeWebhookSkip(
         input,
         store.storeId,
@@ -497,12 +553,12 @@ export async function handleInventoryLevelUpdateWebhook(
       );
     }
 
-    result.totalAvailable = totalAvailable;
+    result.totalAvailable = inventoryState.totalAvailable;
 
     const updatedCount = await updateProductInventoryQuantity(
       store.storeId,
       shopifyInventoryItemId,
-      totalAvailable,
+      inventoryState.totalAvailable,
     );
     result.updated = updatedCount;
 
@@ -513,7 +569,7 @@ export async function handleInventoryLevelUpdateWebhook(
       webhookId: input.webhookId,
       operation: "quantity_updated",
       shopifyInventoryItemId,
-      totalAvailable,
+      totalAvailable: inventoryState.totalAvailable,
       updated: updatedCount,
       locationId: parsed.location_id ?? undefined,
     });
@@ -531,7 +587,7 @@ export async function handleInventoryLevelUpdateWebhook(
       webhookId: input.webhookId,
       operation: "webhook_completed",
       shopifyInventoryItemId,
-      totalAvailable,
+      totalAvailable: inventoryState.totalAvailable,
       updated: updatedCount,
       durationMs,
     });

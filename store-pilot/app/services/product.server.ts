@@ -135,8 +135,11 @@ interface NormalizedVariantRow {
   status: ProductStatus;
   price: Prisma.Decimal | null;
   inventoryQuantity: number | null;
-  inventoryTracked: boolean;
+  /** Set only by GraphQL sync normalization (`normalizeVariantRow`). */
+  inventoryTracked?: boolean;
 }
+
+export type UpsertVariantSource = "sync" | "webhook";
 
 export interface ShopifyProductWebhookVariant {
   admin_graphql_api_id?: string | null;
@@ -301,6 +304,7 @@ export function normalizeVariantRow(
 export async function upsertVariantRow(
   storeId: string,
   row: NormalizedVariantRow,
+  source: UpsertVariantSource = "sync",
 ): Promise<void> {
   if (process.env.PRODUCT_SYNC_SIMULATE_PRISMA_FAILURE === "1") {
     throw new Error(
@@ -308,14 +312,65 @@ export async function upsertVariantRow(
     );
   }
 
-  await prisma.product.upsert({
+  const existing = await prisma.product.findUnique({
     where: {
       storeId_shopifyVariantId: {
         storeId,
         shopifyVariantId: row.shopifyVariantId,
       },
     },
-    create: {
+    select: { inventoryTracked: true },
+  });
+
+  const catalogUpdate = {
+    shopifyProductId: row.shopifyProductId,
+    title: row.title,
+    sku: row.sku,
+    status: row.status,
+    price: row.price,
+    ...(row.shopifyInventoryItemId != null && {
+      shopifyInventoryItemId: row.shopifyInventoryItemId,
+    }),
+  };
+
+  if (existing) {
+    const updateData: Prisma.ProductUpdateInput = { ...catalogUpdate };
+
+    if (source === "sync") {
+      const inventoryTracked = row.inventoryTracked ?? true;
+      updateData.inventoryTracked = inventoryTracked;
+      if (!inventoryTracked) {
+        updateData.inventoryQuantity = row.inventoryQuantity;
+      }
+    } else if (!existing.inventoryTracked) {
+      updateData.inventoryQuantity = row.inventoryQuantity;
+    }
+
+    await prisma.product.update({
+      where: {
+        storeId_shopifyVariantId: {
+          storeId,
+          shopifyVariantId: row.shopifyVariantId,
+        },
+      },
+      data: updateData,
+    });
+    return;
+  }
+
+  let inventoryTracked: boolean;
+  let inventoryQuantity: number | null;
+
+  if (source === "sync") {
+    inventoryTracked = row.inventoryTracked ?? true;
+    inventoryQuantity = row.inventoryQuantity;
+  } else {
+    inventoryTracked = row.shopifyInventoryItemId != null;
+    inventoryQuantity = inventoryTracked ? null : row.inventoryQuantity;
+  }
+
+  await prisma.product.create({
+    data: {
       storeId,
       shopifyProductId: row.shopifyProductId,
       shopifyVariantId: row.shopifyVariantId,
@@ -324,20 +379,8 @@ export async function upsertVariantRow(
       sku: row.sku,
       status: row.status,
       price: row.price,
-      inventoryQuantity: row.inventoryQuantity,
-      inventoryTracked: row.inventoryTracked,
-    },
-    update: {
-      shopifyProductId: row.shopifyProductId,
-      title: row.title,
-      sku: row.sku,
-      status: row.status,
-      price: row.price,
-      inventoryQuantity: row.inventoryQuantity,
-      inventoryTracked: row.inventoryTracked,
-      ...(row.shopifyInventoryItemId != null && {
-        shopifyInventoryItemId: row.shopifyInventoryItemId,
-      }),
+      inventoryQuantity,
+      inventoryTracked,
     },
   });
 }
@@ -514,7 +557,7 @@ export async function syncProductsFromShopify(
             continue;
           }
 
-          await upsertVariantRow(storeId, row);
+          await upsertVariantRow(storeId, row, "sync");
           result.upserted += 1;
         }
       }
@@ -696,7 +739,6 @@ export function normalizeWebhookVariantRow(
   }
 
   const sku = variant.sku?.trim() ? variant.sku : null;
-  const inventoryManagement = variant.inventory_management?.toLowerCase();
   const shopifyInventoryItemId =
     variant.inventory_item_id !== undefined && variant.inventory_item_id !== null
       ? toShopifyGid("InventoryItem", variant.inventory_item_id)
@@ -711,7 +753,6 @@ export function normalizeWebhookVariantRow(
     status: mapProductStatus(payload.status),
     price: variant.price ? new Prisma.Decimal(variant.price) : null,
     inventoryQuantity: variant.inventory_quantity ?? null,
-    inventoryTracked: inventoryManagement === "shopify",
   };
 }
 
@@ -839,7 +880,7 @@ async function upsertProductFromWebhookPayload(
     }
 
     activeVariantIds.push(row.shopifyVariantId);
-    await upsertVariantRow(storeId, row);
+    await upsertVariantRow(storeId, row, "webhook");
     result.upserted += 1;
   }
 
