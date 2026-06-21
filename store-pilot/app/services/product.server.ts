@@ -135,6 +135,62 @@ interface NormalizedVariantRow {
   inventoryTracked: boolean;
 }
 
+export interface ShopifyProductWebhookVariant {
+  admin_graphql_api_id?: string | null;
+  id?: number | string | null;
+  sku?: string | null;
+  price?: string | null;
+  inventory_quantity?: number | null;
+  inventory_management?: string | null;
+}
+
+export interface ShopifyProductWebhookPayload {
+  admin_graphql_api_id?: string | null;
+  id?: number | string | null;
+  title?: string | null;
+  status?: string | null;
+  variants?: ShopifyProductWebhookVariant[] | null;
+}
+
+export type ProductWebhookInput = {
+  shop: string;
+  topic: string;
+  payload: Record<string, unknown>;
+  webhookId: string;
+};
+
+export type ProductWebhookResult = {
+  success: boolean;
+  upserted: number;
+  archived: number;
+  skipped: number;
+  shopifyProductId?: string;
+};
+
+type ProductWebhookLogContext = {
+  shop: string;
+  storeId?: string;
+  topic?: string;
+  webhookId?: string;
+  operation:
+    | "webhook_received"
+    | "webhook_upsert"
+    | "webhook_reconcile"
+    | "webhook_archive"
+    | "webhook_completed"
+    | "webhook_summary"
+    | "webhook_failed"
+    | "webhook_skipped"
+    | "store_ineligible"
+    | "zero_variants";
+  reason?: string;
+  shopifyProductId?: string;
+  upserted?: number;
+  archived?: number;
+  skipped?: number;
+  durationMs?: number;
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -549,4 +605,465 @@ export function scheduleBootstrapProductSync(input: {
       reason: error instanceof Error ? error.message : "unknown_error",
     });
   });
+}
+
+export function logProductWebhook(
+  level: LogLevel,
+  message: string,
+  context: ProductWebhookLogContext,
+): void {
+  const payload = { message, ...context };
+
+  if (level === "error") {
+    console.error("[product-webhook]", payload);
+    return;
+  }
+
+  if (level === "warn") {
+    console.warn("[product-webhook]", payload);
+    return;
+  }
+
+  console.info("[product-webhook]", payload);
+}
+
+function toShopifyGid(
+  resource: "Product" | "ProductVariant",
+  id: string | number,
+): string {
+  const value = String(id);
+  if (value.startsWith("gid://")) {
+    return value;
+  }
+
+  return `gid://shopify/${resource}/${value}`;
+}
+
+export function parseProductWebhookPayload(
+  payload: Record<string, unknown>,
+): ShopifyProductWebhookPayload | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  return payload as ShopifyProductWebhookPayload;
+}
+
+function resolveShopifyProductId(
+  payload: ShopifyProductWebhookPayload,
+): string | null {
+  if (payload.admin_graphql_api_id) {
+    return payload.admin_graphql_api_id;
+  }
+
+  if (payload.id !== undefined && payload.id !== null) {
+    return toShopifyGid("Product", payload.id);
+  }
+
+  return null;
+}
+
+function resolveShopifyVariantId(variant: ShopifyProductWebhookVariant): string | null {
+  if (variant.admin_graphql_api_id) {
+    return variant.admin_graphql_api_id;
+  }
+
+  if (variant.id !== undefined && variant.id !== null) {
+    return toShopifyGid("ProductVariant", variant.id);
+  }
+
+  return null;
+}
+
+export function normalizeWebhookVariantRow(
+  payload: ShopifyProductWebhookPayload,
+  variant: ShopifyProductWebhookVariant,
+): NormalizedVariantRow | null {
+  const shopifyProductId = resolveShopifyProductId(payload);
+  const shopifyVariantId = resolveShopifyVariantId(variant);
+
+  if (!shopifyProductId || !payload.title || !shopifyVariantId) {
+    return null;
+  }
+
+  const sku = variant.sku?.trim() ? variant.sku : null;
+  const inventoryManagement = variant.inventory_management?.toLowerCase();
+
+  return {
+    shopifyProductId,
+    shopifyVariantId,
+    title: payload.title,
+    sku,
+    status: mapProductStatus(payload.status),
+    price: variant.price ? new Prisma.Decimal(variant.price) : null,
+    inventoryQuantity: variant.inventory_quantity ?? null,
+    inventoryTracked: inventoryManagement === "shopify",
+  };
+}
+
+export async function resolveStoreForWebhook(
+  shop: string,
+): Promise<{ storeId: string } | null> {
+  const store = await prisma.store.findUnique({
+    where: { shopifyDomain: shop },
+    select: { id: true, active: true },
+  });
+
+  if (!store?.active) {
+    logProductWebhook("error", "Store is not eligible for product webhook", {
+      shop,
+      operation: "store_ineligible",
+      reason: !store ? "store_not_found" : "store_inactive",
+    });
+    return null;
+  }
+
+  return { storeId: store.id };
+}
+
+export async function archiveProductByShopifyId(
+  storeId: string,
+  shopifyProductId: string,
+): Promise<number> {
+  const result = await prisma.product.updateMany({
+    where: {
+      storeId,
+      shopifyProductId,
+      status: { not: "archived" },
+    },
+    data: { status: "archived" },
+  });
+
+  return result.count;
+}
+
+export async function reconcileRemovedVariants(
+  storeId: string,
+  shopifyProductId: string,
+  activeVariantIds: string[],
+): Promise<number> {
+  const result = await prisma.product.updateMany({
+    where: {
+      storeId,
+      shopifyProductId,
+      shopifyVariantId: { notIn: activeVariantIds },
+      status: { not: "archived" },
+    },
+    data: { status: "archived" },
+  });
+
+  return result.count;
+}
+
+async function upsertProductFromWebhookPayload(
+  input: ProductWebhookInput,
+  storeId: string,
+  reconcile: boolean,
+): Promise<ProductWebhookResult> {
+  const startedAt = Date.now();
+  const result: ProductWebhookResult = {
+    success: false,
+    upserted: 0,
+    archived: 0,
+    skipped: 0,
+  };
+
+  const payload = parseProductWebhookPayload(input.payload);
+  if (!payload) {
+    logProductWebhook("warn", "Invalid product webhook payload", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "invalid_payload",
+    });
+    result.success = true;
+    result.skipped += 1;
+    return result;
+  }
+
+  const shopifyProductId = resolveShopifyProductId(payload);
+  if (!shopifyProductId || !payload.title) {
+    logProductWebhook("warn", "Product webhook missing required fields", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "missing_product_fields",
+    });
+    result.success = true;
+    result.skipped += 1;
+    return result;
+  }
+
+  result.shopifyProductId = shopifyProductId;
+  const variants = payload.variants ?? [];
+
+  if (variants.length === 0) {
+    logProductWebhook("warn", "Product webhook has zero variants", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "zero_variants",
+      reason: shopifyProductId,
+      shopifyProductId,
+    });
+    result.success = true;
+    return result;
+  }
+
+  const activeVariantIds: string[] = [];
+
+  for (const variant of variants) {
+    const row = normalizeWebhookVariantRow(payload, variant);
+    if (!row) {
+      result.skipped += 1;
+      continue;
+    }
+
+    activeVariantIds.push(row.shopifyVariantId);
+    await upsertVariantRow(storeId, row);
+    result.upserted += 1;
+  }
+
+  logProductWebhook("info", "Product webhook variants upserted", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_upsert",
+    shopifyProductId,
+    upserted: result.upserted,
+    skipped: result.skipped,
+  });
+
+  if (reconcile) {
+    result.archived = await reconcileRemovedVariants(
+      storeId,
+      shopifyProductId,
+      activeVariantIds,
+    );
+
+    if (result.archived > 0) {
+      logProductWebhook("info", "Removed product variants archived", {
+        shop: input.shop,
+        storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "webhook_reconcile",
+        shopifyProductId,
+        archived: result.archived,
+      });
+    }
+  }
+
+  if (mapProductStatus(payload.status) === "archived") {
+    result.archived += await archiveProductByShopifyId(storeId, shopifyProductId);
+  }
+
+  result.success = true;
+  const durationMs = Date.now() - startedAt;
+
+  logProductWebhook("info", "Product webhook completed", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_completed",
+    shopifyProductId,
+    upserted: result.upserted,
+    archived: result.archived,
+    skipped: result.skipped,
+    durationMs,
+  });
+
+  logProductWebhook("info", "Product webhook summary", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_summary",
+    shopifyProductId,
+    upserted: result.upserted,
+    archived: result.archived,
+    skipped: result.skipped,
+    durationMs,
+  });
+
+  return result;
+}
+
+export async function handleProductCreateWebhook(
+  input: ProductWebhookInput,
+): Promise<ProductWebhookResult> {
+  logProductWebhook("info", "Product webhook received", {
+    shop: input.shop,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_received",
+  });
+
+  const store = await resolveStoreForWebhook(input.shop);
+  if (!store) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
+  try {
+    return await upsertProductFromWebhookPayload(input, store.storeId, false);
+  } catch (error) {
+    logProductWebhook("error", "Product create webhook failed", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_failed",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    throw error;
+  }
+}
+
+export async function handleProductUpdateWebhook(
+  input: ProductWebhookInput,
+): Promise<ProductWebhookResult> {
+  logProductWebhook("info", "Product webhook received", {
+    shop: input.shop,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_received",
+  });
+
+  const store = await resolveStoreForWebhook(input.shop);
+  if (!store) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
+  try {
+    return await upsertProductFromWebhookPayload(input, store.storeId, true);
+  } catch (error) {
+    logProductWebhook("error", "Product update webhook failed", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_failed",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    throw error;
+  }
+}
+
+export async function handleProductDeleteWebhook(
+  input: ProductWebhookInput,
+): Promise<ProductWebhookResult> {
+  const startedAt = Date.now();
+
+  logProductWebhook("info", "Product webhook received", {
+    shop: input.shop,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_received",
+  });
+
+  const store = await resolveStoreForWebhook(input.shop);
+  if (!store) {
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
+  const payload = parseProductWebhookPayload(input.payload);
+  const shopifyProductId = payload ? resolveShopifyProductId(payload) : null;
+
+  if (!shopifyProductId) {
+    logProductWebhook("warn", "Product delete webhook missing product id", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "missing_product_id",
+    });
+    return {
+      success: true,
+      upserted: 0,
+      archived: 0,
+      skipped: 1,
+    };
+  }
+
+  try {
+    const archived = await archiveProductByShopifyId(
+      store.storeId,
+      shopifyProductId,
+    );
+
+    logProductWebhook("info", "Product variants archived from delete webhook", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_archive",
+      shopifyProductId,
+      archived,
+    });
+
+    const durationMs = Date.now() - startedAt;
+
+    logProductWebhook("info", "Product webhook completed", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_completed",
+      shopifyProductId,
+      archived,
+      durationMs,
+    });
+
+    logProductWebhook("info", "Product webhook summary", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_summary",
+      shopifyProductId,
+      archived,
+      durationMs,
+    });
+
+    return {
+      success: true,
+      upserted: 0,
+      archived,
+      skipped: 0,
+      shopifyProductId,
+    };
+  } catch (error) {
+    logProductWebhook("error", "Product delete webhook failed", {
+      shop: input.shop,
+      storeId: store.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_failed",
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    throw error;
+  }
 }
