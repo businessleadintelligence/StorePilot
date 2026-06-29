@@ -22,6 +22,61 @@ enum SubscriptionStatus {
   cancelled
 }
 
+enum UsageMetric {
+  products
+  orders
+  ai_requests
+  reports_generated
+}
+
+enum AIAgentId {
+  product_intelligence
+  inventory_intelligence
+  bundle_discovery
+  executive_summary
+  seo_audit
+  store_audit
+  offer_intelligence
+  trend_intelligence
+  pricing_intelligence
+  growth_intelligence
+  executive_coo
+  platform_template
+}
+
+enum AIExecutionStatus {
+  pending
+  running
+  retry
+  succeeded
+  failed
+  cached
+  skipped
+}
+
+enum AIValidationStatus {
+  valid
+  invalid
+  retried
+  failed_after_retry
+}
+
+enum AIRecommendationStatus {
+  open
+  viewed
+  implemented
+  dismissed
+  verified
+  closed
+}
+
+enum AIMemoryScope {
+  recommendation
+  merchant_action
+  dismissal
+  preference
+}
+
 enum UserRole {
   owner
   member
@@ -31,6 +86,72 @@ enum ProductStatus {
   active
   archived
   draft
+}
+
+enum JobType {
+  onboarding_bootstrap
+  bootstrap_products
+  bootstrap_inventory
+  orders_historical
+  orders_incremental
+  connector_sync
+  metrics_recompute
+  recommendations_generate
+  executive_brief_generate
+  founder_maintenance
+}
+
+enum JobStatus {
+  queued
+  running
+  retrying
+  completed
+  failed
+  dead_letter
+  cancelled
+}
+
+enum JobPriority {
+  critical
+  high
+  normal
+  low
+}
+
+enum OnboardingStatus {
+  not_started
+  queued
+  running
+  completed
+  failed
+}
+
+enum OnboardingPhaseStatus {
+  not_started
+  queued
+  running
+  completed
+  failed
+  blocked
+  skipped
+}
+
+enum JobEventType {
+  claimed
+  completed
+  failed
+  retried
+  dead_lettered
+  cancelled
+  progress
+}
+
+enum JobEventActor {
+  system
+  worker
+  merchant
+  founder
+  cron
 }
 
 model Store {
@@ -50,8 +171,12 @@ model Store {
   briefingTime         String             @default("08:00") @db.VarChar(5)
   briefingTimezone     String             @default("UTC") @db.VarChar(100)
   active               Boolean            @default(true)
-  historicalImportDone Boolean            @default(false)
-  lastOrdersSyncAt     DateTime?          @db.Timestamptz
+  lastAuthenticatedAt        DateTime?          @db.Timestamptz
+  firstTrialStartedAt        DateTime?          @db.Timestamptz
+  historicalImportDone         Boolean            @default(false)
+  historicalOrdersImportDone   Boolean            @default(false)
+  ordersSyncCursor             String?            @db.Text
+  lastOrdersSyncAt             DateTime?          @db.Timestamptz
   lastInventorySyncAt  DateTime?          @db.Timestamptz
   lastRefundsSyncAt    DateTime?          @db.Timestamptz
   lastProductsSyncAt   DateTime?          @db.Timestamptz
@@ -61,6 +186,21 @@ model Store {
   users                User[]
   products             Product[]
   webhookEvents        WebhookEvent[]
+  orders               Order[]
+  orderLineItems       OrderLineItem[]
+  syncJobs             SyncJob[]
+  jobEvents            JobEvent[]
+  storeOnboarding      StoreOnboarding?
+  subscription         Subscription?
+  usageRecords         UsageRecord[]
+  googleIntegration    GoogleIntegration?
+  microsoftClarityIntegration MicrosoftClarityIntegration?
+  customerDataExports  CustomerDataExport[]
+  aiAgentRuns          AiAgentRun[]
+  aiAgentResults       AiAgentResult[]
+  aiRecommendations    AiRecommendation[]
+  aiMemoryRecords      AiMemoryRecord[]
+  aiResultCacheEntries AiResultCacheEntry[]
 
   @@index([active, subscriptionPlan])
   @@index([briefingTime])
@@ -116,6 +256,7 @@ model Product {
   price                  Decimal?      @db.Decimal(12, 2)
   inventoryQuantity      Int?
   inventoryTracked       Boolean       @default(true)
+  shopifyProductUpdatedAt DateTime?    @db.Timestamptz
   createdAt              DateTime      @default(now()) @db.Timestamptz
   updatedAt              DateTime      @updatedAt @db.Timestamptz
 
@@ -131,17 +272,482 @@ model Product {
 }
 
 model WebhookEvent {
-  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  storeId               String   @db.Uuid
-  shopifyWebhookId      String   @unique(map: "webhook_events_shopify_webhook_id_unique") @db.VarChar(255)
-  shop                  String   @db.VarChar(255)
-  topic                 String   @db.VarChar(100)
-  processedSuccessfully Boolean  @default(true)
-  processedAt           DateTime @default(now()) @db.Timestamptz
-  createdAt             DateTime @default(now()) @db.Timestamptz
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String    @db.Uuid
+  shopifyWebhookId      String    @unique(map: "webhook_events_shopify_webhook_id_unique") @db.VarChar(255)
+  shop                  String    @db.VarChar(255)
+  topic                 String    @db.VarChar(100)
+  processedSuccessfully Boolean   @default(true)
+  processedAt           DateTime? @db.Timestamptz
+  processingOwner       String?   @db.VarChar(100)
+  processingExpiresAt   DateTime? @db.Timestamptz
+  createdAt             DateTime  @default(now()) @db.Timestamptz
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([storeId], map: "webhook_events_store_id_idx")
+  @@index([processedSuccessfully, createdAt], map: "webhook_events_processed_created_idx")
+  @@index([processingExpiresAt], map: "webhook_events_processing_expires_idx")
   @@map("webhook_events")
+}
+
+model Order {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                String    @db.Uuid
+  shopifyOrderId         String    @db.VarChar(100)
+  orderName              String    @db.VarChar(50)
+  shopifyCreatedAt       DateTime  @db.Timestamptz
+  shopifyUpdatedAt       DateTime  @db.Timestamptz
+  processedAt            DateTime  @db.Timestamptz
+  cancelledAt            DateTime? @db.Timestamptz
+  metricDate             DateTime  @db.Date
+  displayFinancialStatus String?   @db.VarChar(50)
+  currencyCode           String    @db.VarChar(10)
+  subtotalAmount         Decimal   @db.Decimal(14, 2)
+  totalTaxAmount         Decimal   @db.Decimal(14, 2)
+  totalDiscountAmount    Decimal   @db.Decimal(14, 2)
+  totalPriceAmount       Decimal   @db.Decimal(14, 2)
+  totalRefundedAmount    Decimal   @default(0) @db.Decimal(14, 2)
+  isTest                 Boolean   @default(false)
+  isPaid                 Boolean   @default(false)
+  createdAt              DateTime  @default(now()) @db.Timestamptz
+  updatedAt              DateTime  @updatedAt @db.Timestamptz
+
+  store     Store           @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  lineItems OrderLineItem[]
+
+  @@unique([storeId, shopifyOrderId], map: "orders_store_order_unique")
+  @@index([storeId], map: "orders_store_id_idx")
+  @@index([storeId, metricDate], map: "orders_store_metric_date_idx")
+  @@index([storeId, shopifyUpdatedAt], map: "orders_store_updated_at_idx")
+  @@index([storeId, isPaid, metricDate], map: "orders_store_paid_metric_date_idx")
+  @@map("orders")
+}
+
+model OrderLineItem {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId             String   @db.Uuid
+  orderId             String   @db.Uuid
+  shopifyLineItemId   String   @db.VarChar(100)
+  shopifyOrderId      String   @db.VarChar(100)
+  shopifyProductId    String?  @db.VarChar(100)
+  shopifyVariantId    String?  @db.VarChar(100)
+  sku                 String?  @db.VarChar(255)
+  title               String   @db.VarChar(500)
+  quantity            Int
+  originalUnitPrice   Decimal  @db.Decimal(12, 2)
+  discountedUnitPrice Decimal  @db.Decimal(12, 2)
+  isGiftCard          Boolean  @default(false)
+  createdAt           DateTime @default(now()) @db.Timestamptz
+  updatedAt           DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([storeId, shopifyLineItemId], map: "order_line_items_store_line_unique")
+  @@index([storeId], map: "order_line_items_store_id_idx")
+  @@index([orderId], map: "order_line_items_order_id_idx")
+  @@index([storeId, shopifyVariantId], map: "order_line_items_store_variant_idx")
+  @@map("order_line_items")
+}
+
+model SyncJob {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId        String      @db.Uuid
+  jobType        JobType
+  status         JobStatus   @default(queued)
+  priority       JobPriority @default(normal)
+  payload        Json        @default("{}") @db.JsonB
+  cursorJson     Json?       @db.JsonB
+  progressJson   Json?       @db.JsonB
+  attempts       Int         @default(0)
+  maxAttempts    Int
+  availableAt    DateTime    @default(now()) @db.Timestamptz
+  startedAt      DateTime?   @db.Timestamptz
+  completedAt    DateTime?   @db.Timestamptz
+  failedAt       DateTime?   @db.Timestamptz
+  deadLetterAt   DateTime?   @db.Timestamptz
+  cancelledAt    DateTime?   @db.Timestamptz
+  errorCode      String?     @db.VarChar(100)
+  errorMessage   String?     @db.Text
+  idempotencyKey String      @unique @db.VarChar(255)
+  lockedBy       String?     @db.VarChar(100)
+  lockedAt       DateTime?   @db.Timestamptz
+  lockExpiresAt  DateTime?   @db.Timestamptz
+  heartbeatAt    DateTime?   @db.Timestamptz
+  workerGeneration Int       @default(0)
+  durationMs     Int?
+  createdAt      DateTime    @default(now()) @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @db.Timestamptz
+
+  store                          Store             @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  jobEvents                      JobEvent[]
+  onboardingAsCurrentJob         StoreOnboarding[] @relation("OnboardingCurrentJob")
+  onboardingAsProductSyncJob     StoreOnboarding[] @relation("OnboardingProductSyncJob")
+  onboardingAsInventorySyncJob   StoreOnboarding[] @relation("OnboardingInventorySyncJob")
+  onboardingAsOrdersSyncJob      StoreOnboarding[] @relation("OnboardingOrdersSyncJob")
+
+  @@index([storeId], map: "sync_jobs_store_id_idx")
+  @@index([status, availableAt, priority], map: "sync_jobs_claim_idx")
+  @@index([storeId, jobType, status], map: "sync_jobs_store_type_status_idx")
+  @@index([status, deadLetterAt], map: "sync_jobs_dead_letter_idx")
+  @@index([status, lockExpiresAt], map: "sync_jobs_stale_lock_idx")
+  @@index([createdAt], map: "sync_jobs_created_at_idx")
+  @@map("sync_jobs")
+}
+
+model StoreOnboarding {
+  id                       String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                  String                @unique @db.Uuid
+  status                   OnboardingStatus      @default(not_started)
+  onboardingRunId          String                @db.Uuid
+  currentJobId             String?               @db.Uuid
+  productSyncStatus        OnboardingPhaseStatus @default(not_started)
+  productSyncJobId         String?               @db.Uuid
+  productSyncCompletedAt   DateTime?             @db.Timestamptz
+  inventorySyncStatus      OnboardingPhaseStatus @default(not_started)
+  inventorySyncJobId     String?               @db.Uuid
+  inventorySyncCompletedAt DateTime?             @db.Timestamptz
+  ordersSyncStatus         OnboardingPhaseStatus @default(not_started)
+  ordersSyncJobId          String?               @db.Uuid
+  ordersSyncCompletedAt    DateTime?             @db.Timestamptz
+  ownershipRepairPending   Boolean               @default(false)
+  blockedReason            String?               @db.VarChar(100)
+  blockedMessage           String?               @db.Text
+  degradedReason           String?               @db.VarChar(100)
+  progressPercent          Int                   @default(0)
+  progressLabel            String?               @db.VarChar(255)
+  lastErrorCode            String?               @db.VarChar(100)
+  lastErrorMessage         String?               @db.Text
+  attempts                 Int                   @default(0)
+  maxAttempts              Int                   @default(5)
+  startedAt                DateTime?             @db.Timestamptz
+  coreCompletedAt          DateTime?             @db.Timestamptz
+  completedAt              DateTime?             @db.Timestamptz
+  fullCompletedAt          DateTime?             @db.Timestamptz
+  failedAt                 DateTime?             @db.Timestamptz
+  googleAnalyticsSkippedAt DateTime?             @db.Timestamptz
+  createdAt                DateTime              @default(now()) @db.Timestamptz
+  updatedAt                DateTime              @updatedAt @db.Timestamptz
+
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  currentJob       SyncJob? @relation("OnboardingCurrentJob", fields: [currentJobId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  productSyncJob   SyncJob? @relation("OnboardingProductSyncJob", fields: [productSyncJobId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  inventorySyncJob SyncJob? @relation("OnboardingInventorySyncJob", fields: [inventorySyncJobId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  ordersSyncJob    SyncJob? @relation("OnboardingOrdersSyncJob", fields: [ordersSyncJobId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([status], map: "store_onboarding_status_idx")
+  @@index([status, updatedAt], map: "store_onboarding_stuck_idx")
+  @@index([ordersSyncStatus], map: "store_onboarding_orders_status_idx")
+  @@map("store_onboarding")
+}
+
+model JobEvent {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String        @db.Uuid
+  jobId        String        @db.Uuid
+  eventType    JobEventType
+  fromStatus   JobStatus?
+  toStatus     JobStatus?
+  attemptNumber Int?
+  message      String?       @db.Text
+  metadataJson Json?         @db.JsonB
+  actorType    JobEventActor @default(system)
+  actorId      String?       @db.VarChar(255)
+  createdAt    DateTime      @default(now()) @db.Timestamptz
+
+  store Store   @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  job   SyncJob @relation(fields: [jobId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([jobId, createdAt], map: "job_events_job_id_created_at_idx")
+  @@index([storeId, createdAt], map: "job_events_store_id_created_at_idx")
+  @@index([eventType, createdAt], map: "job_events_event_type_created_at_idx")
+  @@map("job_events")
+}
+
+model Plan {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String   @db.VarChar(100)
+  slug              String   @unique @db.VarChar(50)
+  monthlyPrice      Decimal  @db.Decimal(10, 2)
+  annualPrice       Decimal  @db.Decimal(10, 2)
+  maxProducts       Int
+  maxOrders         Int
+  maxTeamMembers    Int
+  aiCreditsPerMonth Int
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId            String             @unique @db.Uuid
+  planId             String             @db.Uuid
+  status             SubscriptionStatus @default(trialing)
+  currentPeriodStart DateTime           @db.Timestamptz
+  currentPeriodEnd   DateTime           @db.Timestamptz
+  trialEndsAt        DateTime?          @db.Timestamptz
+  endedAt            DateTime?          @db.Timestamptz
+  createdAt          DateTime           @default(now()) @db.Timestamptz
+  updatedAt          DateTime           @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  plan  Plan  @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([planId], map: "subscriptions_plan_id_idx")
+  @@index([status], map: "subscriptions_status_idx")
+  @@index([endedAt], map: "subscriptions_ended_at_idx")
+  @@map("subscriptions")
+}
+
+model UsageRecord {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId   String      @db.Uuid
+  metric    UsageMetric
+  value     Int         @default(0)
+  month     String      @db.VarChar(7)
+  createdAt DateTime    @default(now()) @db.Timestamptz
+  updatedAt DateTime    @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([storeId, metric, month], map: "usage_records_store_metric_month_unique")
+  @@index([storeId, month], map: "usage_records_store_month_idx")
+  @@map("usage_records")
+}
+
+model GoogleIntegration {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String    @unique @db.Uuid
+  googleAccountId       String    @db.VarChar(100)
+  email                 String    @db.VarChar(320)
+  refreshToken          String
+  accessToken           String
+  expiresAt             DateTime  @db.Timestamptz
+  connectedAt           DateTime  @default(now()) @db.Timestamptz
+  lastSyncAt            DateTime? @db.Timestamptz
+  analyticsPropertyId   String?   @db.VarChar(100)
+  analyticsPropertyName String?   @db.VarChar(255)
+  searchConsoleSiteUrl  String?   @db.VarChar(512)
+  searchConsoleSiteName String?   @db.VarChar(255)
+  searchConsoleLastSyncAt DateTime? @db.Timestamptz
+  pageSpeedLastSyncAt   DateTime? @db.Timestamptz
+  isActive              Boolean   @default(true)
+  createdAt             DateTime  @default(now()) @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([isActive, lastSyncAt], map: "google_integrations_active_sync_idx")
+  @@map("google_integrations")
+}
+
+model MicrosoftClarityIntegration {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String    @unique @db.Uuid
+  projectId   String    @db.VarChar(100)
+  projectName String?   @db.VarChar(255)
+  apiToken    String
+  connectedAt DateTime  @default(now()) @db.Timestamptz
+  lastSyncAt  DateTime? @db.Timestamptz
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([isActive, lastSyncAt], map: "microsoft_clarity_integrations_active_sync_idx")
+  @@map("microsoft_clarity_integrations")
+}
+
+model CustomerDataExport {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String   @db.Uuid
+  shopifyCustomerId String   @db.VarChar(100)
+  dataRequestId     String?  @db.VarChar(100)
+  shopifyWebhookId  String   @db.VarChar(255)
+  exportPayload     Json
+  createdAt         DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, shopifyWebhookId], map: "customer_data_exports_store_webhook_unique")
+  @@index([storeId, shopifyCustomerId], map: "customer_data_exports_store_customer_idx")
+  @@map("customer_data_exports")
+}
+
+model AiPromptVersion {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  promptId       String   @db.VarChar(100)
+  version        String   @db.VarChar(50)
+  checksum       String   @db.VarChar(64)
+  description    String   @db.Text
+  expectedSchema String   @db.VarChar(100)
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  runs AiAgentRun[]
+
+  @@unique([promptId, version], map: "ai_prompt_versions_prompt_version_unique")
+  @@index([promptId, createdAt], map: "ai_prompt_versions_prompt_created_idx")
+  @@map("ai_prompt_versions")
+}
+
+model AiAgentRun {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String              @db.Uuid
+  merchantId        String?             @db.Uuid
+  agentId           AIAgentId
+  status            AIExecutionStatus   @default(pending)
+  validationStatus  AIValidationStatus?
+  subjectKey        String              @db.VarChar(255)
+  inputFingerprint  String              @db.VarChar(64)
+  contextJson       Json
+  promptId          String              @db.VarChar(100)
+  promptVersion     String              @db.VarChar(50)
+  promptChecksum    String              @db.VarChar(64)
+  promptVersionId   String?             @db.Uuid
+  providerId        String              @db.VarChar(50)
+  modelId           String              @db.VarChar(100)
+  retryCount        Int                 @default(0)
+  latencyMs         Int                 @default(0)
+  promptTokens      Int                 @default(0)
+  completionTokens  Int                 @default(0)
+  totalTokens       Int                 @default(0)
+  estimatedCostUsd  Decimal             @default(0) @db.Decimal(12, 6)
+  errorCode         String?             @db.VarChar(100)
+  errorMessage      String?             @db.Text
+  startedAt         DateTime            @default(now()) @db.Timestamptz
+  completedAt       DateTime?           @db.Timestamptz
+  createdAt         DateTime            @default(now()) @db.Timestamptz
+
+  store              Store            @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  promptVersionRecord AiPromptVersion? @relation(fields: [promptVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  result        AiAgentResult?
+  telemetry     AiExecutionTelemetry?
+  recommendations AiRecommendation[]
+
+  @@index([storeId, agentId, createdAt], map: "ai_agent_runs_store_agent_created_idx")
+  @@index([storeId, agentId, inputFingerprint], map: "ai_agent_runs_store_agent_fingerprint_idx")
+  @@index([status, createdAt], map: "ai_agent_runs_status_created_idx")
+  @@map("ai_agent_runs")
+}
+
+model AiAgentResult {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId            String    @unique @db.Uuid
+  storeId          String    @db.Uuid
+  agentId          AIAgentId
+  subjectKey       String    @db.VarChar(255)
+  inputFingerprint String    @db.VarChar(64)
+  resultJson       Json
+  summary          String?   @db.Text
+  priority         Int?
+  confidence       Decimal?  @db.Decimal(5, 4)
+  isSuccess        Boolean   @default(true)
+  expiresAt        DateTime? @db.Timestamptz
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+
+  run   AiAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  store Store      @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  cacheEntries AiResultCacheEntry[]
+
+  @@index([storeId, agentId, inputFingerprint, isSuccess], map: "ai_agent_results_cache_lookup_idx")
+  @@index([storeId, agentId, isSuccess, createdAt], map: "ai_agent_results_store_agent_success_idx")
+  @@map("ai_agent_results")
+}
+
+model AiExecutionTelemetry {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId            String             @unique @db.Uuid
+  storeId          String             @db.Uuid
+  merchantId       String?            @db.Uuid
+  agentId          AIAgentId
+  providerId       String             @db.VarChar(50)
+  modelId          String             @db.VarChar(100)
+  promptId         String             @db.VarChar(100)
+  promptVersion    String             @db.VarChar(50)
+  promptChecksum   String             @db.VarChar(64)
+  latencyMs        Int
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  estimatedCostUsd Decimal            @db.Decimal(12, 6)
+  retryCount       Int
+  validationStatus AIValidationStatus
+  executionStatus  AIExecutionStatus
+  createdAt        DateTime           @default(now()) @db.Timestamptz
+
+  run AiAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, agentId, createdAt], map: "ai_execution_telemetry_store_agent_created_idx")
+  @@map("ai_execution_telemetry")
+}
+
+model AiRecommendation {
+  id                 String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stableId           String                 @db.VarChar(64)
+  storeId            String                 @db.Uuid
+  agentId            AIAgentId
+  runId              String                 @db.Uuid
+  subjectKey         String                 @db.VarChar(255)
+  title              String                 @db.VarChar(500)
+  summary            String                 @db.Text
+  category           String                 @db.VarChar(100)
+  priority           Int
+  confidence         Decimal                @db.Decimal(5, 4)
+  status             AIRecommendationStatus @default(open)
+  payloadJson        Json
+  firstSeenAt        DateTime               @default(now()) @db.Timestamptz
+  lastSeenAt         DateTime               @default(now()) @db.Timestamptz
+  statusChangedAt    DateTime               @default(now()) @db.Timestamptz
+  createdAt          DateTime               @default(now()) @db.Timestamptz
+  updatedAt          DateTime               @updatedAt @db.Timestamptz
+
+  store Store      @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  run   AiAgentRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, stableId], map: "ai_recommendations_store_stable_unique")
+  @@index([storeId, agentId, status], map: "ai_recommendations_store_agent_status_idx")
+  @@index([storeId, subjectKey, status], map: "ai_recommendations_store_subject_status_idx")
+  @@map("ai_recommendations")
+}
+
+model AiMemoryRecord {
+  id        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId   String        @db.Uuid
+  scope     AIMemoryScope
+  subjectKey String       @db.VarChar(255)
+  payloadJson Json
+  createdAt DateTime      @default(now()) @db.Timestamptz
+  updatedAt DateTime      @updatedAt @db.Timestamptz
+  expiresAt DateTime?     @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storeId, scope, subjectKey], map: "ai_memory_records_store_scope_subject_idx")
+  @@map("ai_memory_records")
+}
+
+model AiResultCacheEntry {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String   @db.Uuid
+  agentId          AIAgentId
+  subjectKey       String   @db.VarChar(255)
+  inputFingerprint String   @db.VarChar(64)
+  resultId         String   @db.Uuid
+  validUntil       DateTime? @db.Timestamptz
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @updatedAt @db.Timestamptz
+
+  store  Store         @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  result AiAgentResult @relation(fields: [resultId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, agentId, subjectKey, inputFingerprint], map: "ai_result_cache_unique")
+  @@index([storeId, agentId, subjectKey], map: "ai_result_cache_store_agent_subject_idx")
+  @@map("ai_result_cache_entries")
 }

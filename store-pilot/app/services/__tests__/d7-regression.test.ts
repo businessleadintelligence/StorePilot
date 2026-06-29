@@ -5,7 +5,9 @@ import {
   SHOP,
   STORE_ID,
   VARIANT_GID,
+  VARIANT_GID_2,
   mockInventoryGraphqlResponse,
+  mockProductByIdResponse,
   mockProductsSyncGraphqlResponse,
   testHarness,
 } from "./helpers/fixtures";
@@ -71,6 +73,7 @@ beforeEach(() => {
   const harness = testHarness();
   harness.resetDbState();
   harness.mockAdminGraphql.mockReset();
+  vi.clearAllMocks();
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -158,14 +161,118 @@ describe("D.7.9 Critical Hardening Regression", () => {
     });
   });
 
+  describe("F.2.1 Product create transaction hardening", () => {
+    const multiVariantPayload = {
+      admin_graphql_api_id: PRODUCT_GID,
+      title: "Multi Variant Product",
+      status: "active",
+      variants: [
+        {
+          admin_graphql_api_id: VARIANT_GID,
+          inventory_item_id: 123,
+          inventory_quantity: 3,
+          inventory_management: null,
+          sku: "SKU-1",
+          price: "19.99",
+        },
+        {
+          admin_graphql_api_id: VARIANT_GID_2,
+          inventory_item_id: 124,
+          inventory_quantity: 7,
+          inventory_management: null,
+          sku: "SKU-2",
+          price: "29.99",
+        },
+      ],
+    };
+
+    it("Scenario A: rolls back all variant writes when a mid-write fails", async () => {
+      const harness = testHarness();
+      const defaultCreate = harness.prismaMock.product.create.getMockImplementation();
+      let createAttempts = 0;
+
+      harness.prismaMock.product.create.mockImplementation(async (args) => {
+        createAttempts += 1;
+        if (createAttempts === 2) {
+          throw new Error("simulated_variant_write_failure");
+        }
+
+        return defaultCreate!(args);
+      });
+
+      await expect(
+        handleProductCreateWebhook({
+          shop: SHOP,
+          topic: "products/create",
+          webhookId: "wh-create-txn-fail",
+          payload: multiVariantPayload,
+        }),
+      ).rejects.toThrow("simulated_variant_write_failure");
+
+      expect(harness.dbState.products.size).toBe(0);
+    });
+
+    it("Scenario B: commits all variants on successful create", async () => {
+      const harness = testHarness();
+
+      const result = await handleProductCreateWebhook({
+        shop: SHOP,
+        topic: "products/create",
+        webhookId: "wh-create-txn-success",
+        payload: multiVariantPayload,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.upserted).toBe(2);
+      expect(harness.dbState.products.size).toBe(2);
+      expect(harness.getProduct(VARIANT_GID)).toBeDefined();
+      expect(harness.getProduct(VARIANT_GID_2)).toBeDefined();
+    });
+
+    it("Scenario C: duplicate webhook delivery remains idempotent", async () => {
+      const harness = testHarness();
+      const processedEvent = {
+        id: "event-create-dup",
+        storeId: STORE_ID,
+        shopifyWebhookId: "wh-create-txn-dup",
+        shop: SHOP,
+        topic: "products/create",
+        processedSuccessfully: true,
+        processedAt: new Date(),
+        createdAt: new Date(),
+      };
+      harness.dbState.webhookEvents.set("wh-create-txn-dup", processedEvent);
+      harness.dbState.webhookEventsById.set("event-create-dup", processedEvent);
+
+      const result = await handleProductCreateWebhook({
+        shop: SHOP,
+        topic: "products/create",
+        webhookId: "wh-create-txn-dup",
+        payload: multiVariantPayload,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.skipped).toBe(1);
+      expect(result.upserted).toBe(0);
+      expect(harness.dbState.products.size).toBe(0);
+    });
+  });
+
   describe("4. Product webhook update", () => {
     it("preserves inventoryTracked and tracked inventoryQuantity", async () => {
-      const { getProduct, seedProduct } = testHarness();
+      const { getProduct, seedProduct, mockAdminGraphql } = testHarness();
       seedProduct({
         shopifyVariantId: VARIANT_GID,
         inventoryTracked: true,
         inventoryQuantity: 11,
       });
+
+      mockAdminGraphql.mockResolvedValue(
+        mockProductByIdResponse({
+          title: "Updated Product Title",
+          inventoryQuantity: 5,
+        }),
+      );
 
       const result = await handleProductUpdateWebhook({
         shop: SHOP,

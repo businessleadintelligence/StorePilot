@@ -1,0 +1,34 @@
+---
+description: Billing pricing and plan definitions must use plan-config.ts only
+globs: store-pilot/app/billing/**,store-pilot/app/components/billing/**,store-pilot/app/routes/app.billing.tsx,store-pilot/app/routes/app.settings.tsx,store-pilot/prisma/seed.ts
+alwaysApply: false
+---
+
+# Billing Single Source of Truth
+
+**BILLING RULE:** All pricing, trial, limits, and plan definitions MUST come from `app/billing/plan-config.ts`. No exceptions.
+
+## Required pattern
+
+```typescript
+import { BILLING_CONFIG } from "~/billing/plan-config";
+// or derive via billing-limits helpers (getCanonicalPlan, listCanonicalPlans, buildDbPlanSeedRecords)
+```
+
+## Never duplicate in other files
+
+- Plan prices (`29`, `79`, `199`, `399`)
+- `trialDays`
+- Usage limits (`aiExecutions`, `automations`, `connectorSyncFrequencyHours`, `stores`)
+- Feature flags (`executiveCOO`, `automationCenter`, `advancedAnalytics`)
+
+## When adding or changing plans
+
+1. Update `app/billing/plan-config.ts` only
+2. Run `billing-config-consistency.test.ts`
+3. Ensure Shopify Billing API charge amounts use `BILLING_CONFIG.plans`
+4. Ensure UI displays prices from dashboard/plan helpers — never inline constants
+
+## Validation
+
+`billing-config-validator.ts` runs in non-production and throws on config drift (missing plans, duplicate prices, inconsistent trial days).

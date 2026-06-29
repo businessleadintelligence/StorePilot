@@ -1,0 +1,340 @@
+{
+  "storeId": "store-1",
+  "storeName": "Acme Outfitters",
+  "computedAt": "2026-06-29T17:50:21.681Z",
+  "operationsHealthScore": 63,
+  "revenueOpportunity": 18200,
+  "inventoryRisk": 42,
+  "growthScore": 68,
+  "storeHealthScore": 74,
+  "criticalIssueCount": 0,
+  "scores": {
+    "businessHealthScore": 68,
+    "executiveHealthScore": 63,
+    "businessMomentum": 33,
+    "growthMomentum": 54,
+    "storeHealthScore": 74,
+    "agentHealthAverage": 71,
+    "executionPressure": 14,
+    "revenueGrowthRate": 13.64
+  },
+  "businessUrgency": 35,
+  "executiveConfidence": 0.89,
+  "growthMomentum": 54,
+  "executionReadiness": 74,
+  "automationReadiness": 38,
+  "focusScore": 93,
+  "focusAreas": [
+    "high_priority_concentration"
+  ],
+  "merchantCapacity": {
+    "merchantCapacityScore": 73,
+    "availableSlots": 1,
+    "overloadRisk": "low",
+    "issues": []
+  },
+  "executionCapacity": {
+    "executionCapacityScore": 59,
+    "parallelWorkstreams": 1,
+    "issues": []
+  },
+  "workload": {
+    "totalEstimatedMinutes": 240,
+    "activeMinutes": 60,
+    "backlogMinutes": 90,
+    "workloadScore": 100,
+    "overload": false,
+    "issues": []
+  },
+  "resourceLoad": {
+    "resourceLoadScore": 31,
+    "utilizationPercent": 95,
+    "headroomPercent": 5,
+    "issues": [
+      "resource_utilization_critical"
+    ]
+  },
+  "opportunityCost": {
+    "opportunityCostScore": 0,
+    "estimatedRevenueCost": 0,
+    "estimatedProfitCost": 0,
+    "issues": []
+  },
+  "executionRisk": {
+    "executionRiskScore": 9,
+    "riskLevel": "low",
+    "topRisks": [],
+    "issues": []
+  },
+  "conflicts": {
+    "conflicts": [],
+    "conflictScore": 0,
+    "highSeverityCount": 0,
+    "issues": []
+  },
+  "dependencyGraph": {
+    "nodes": [
+      {
+        "id": "inventory:replenish-hero-skus",
+        "label": "Replenish hero SKUs before campaign push",
+        "agentId": "inventory_intelligence",
+        "dependsOn": []
+      },
+      {
+        "id": "growth:retention-winback",
+        "label": "Launch repeat-buyer win-back sequence",
+        "agentId": "growth_intelligence",
+        "dependsOn": [
+          "inventory:replenish-hero-skus"
+        ]
+      },
+      {
+        "id": "pricing:margin-recovery",
+        "label": "Reduce discount depth on premium SKUs",
+        "agentId": "pricing_intelligence",
+        "dependsOn": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "inventory:replenish-hero-skus",
+        "to": "growth:retention-winback",
+        "reason": "prerequisite_action"
+      },
+      {
+        "from": "inventory:replenish-hero-skus",
+        "to": "growth:retention-winback",
+        "reason": "inventory_prerequisite"
+      }
+    ],
+    "blockedChainCount": 0,
+    "rootCount": 2
+  },
+  "criticalPath": {
+    "path": [
+      "inventory:replenish-hero-skus",
+      "pricing:margin-recovery"
+    ],
+    "totalMinutes": 120,
+    "bottleneckId": "inventory:replenish-hero-skus",
+    "depth": 2
+  },
+  "executionOrder": {
+    "executionOrder": [
+      "inventory:replenish-hero-skus",
+      "pricing:margin-recovery"
+    ],
+    "parallelizable": [
+      [
+        "inventory:replenish-hero-skus",
+        "pricing:margin-recovery"
+      ]
+    ],
+    "blockedItems": [
+      "growth:retention-winback"
+    ]
+  },
+  "blockers": {
+    "blockers": [
+      {
+        "id": "blocker-dep-growth:retention-winback",
+        "title": "Dependency blocker for growth:retention-winback",
+        "type": "dependency",
+        "reason": "Prerequisite work is incomplete.",
+        "severity": "medium",
+        "blockedTaskIds": [
+          "growth:retention-winback"
+        ]
+      }
+    ],
+    "blockedTaskCount": 1,
+    "criticalBlockerCount": 0,
+    "issues": []
+  },
+  "planningHorizons": {
+    "dailyBriefing": [
+      "inventory:replenish-hero-skus",
+      "growth:retention-winback",
+      "pricing:margin-recovery"
+    ],
+    "weeklyPlan": [
+      "inventory:replenish-hero-skus",
+      "growth:retention-winback",
+      "pricing:margin-recovery"
+    ],
+    "monthlyObjectives": [
+      "inventory:replenish-hero-skus",
+      "growth:retention-winback",
+      "pricing:margin-recovery"
+    ]
+  },
+  "summarySignals": {
+    "headline": "Executive posture is workable but requires tighter focus.",
+    "keySignals": [
+      "Business fundamentals need reinforcement.",
+      "1 blocker(s) are slowing execution."
+    ],
+    "narrativeHints": [
+      "Anchor the narrative around: Replenish hero SKUs before campaign push; Launch repeat-buyer win-back sequence.",
+      "Confidence baseline: 89%."
+    ]
+  },
+  "businessHealthSummary": {
+    "score": 68,
+    "band": "watch",
+    "headline": "Business health is mixed; prioritize blockers and quick wins.",
+    "drivers": [
+      "Revenue trend is positive and supports expansion.",
+      "Specialist agents report healthy store foundations."
+    ]
+  },
+  "rankedPriorities": [
+    {
+      "id": "inventory:replenish-hero-skus",
+      "title": "Replenish hero SKUs before campaign push",
+      "priorityScore": 100,
+      "priorityLevel": 1,
+      "confidence": 0.88,
+      "revenueImpact": 2750,
+      "profitImpact": 3385,
+      "expectedRoi": 100,
+      "dependsOn": [],
+      "estimatedMinutes": 60
+    },
+    {
+      "id": "growth:retention-winback",
+      "title": "Launch repeat-buyer win-back sequence",
+      "priorityScore": 100,
+      "priorityLevel": 1,
+      "confidence": 0.86,
+      "revenueImpact": 2688,
+      "profitImpact": 3358,
+      "expectedRoi": 100,
+      "dependsOn": [
+        "inventory:replenish-hero-skus"
+      ],
+      "estimatedMinutes": 60
+    },
+    {
+      "id": "pricing:margin-recovery",
+      "title": "Reduce discount depth on premium SKUs",
+      "priorityScore": 100,
+      "priorityLevel": 1,
+      "confidence": 0.83,
+      "revenueImpact": 2594,
+      "profitImpact": 3319,
+      "expectedRoi": 100,
+      "dependsOn": [],
+      "estimatedMinutes": 60
+    }
+  ],
+  "agentSnapshots": [
+    {
+      "agentId": "inventory_intelligence",
+      "summary": "Inventory coverage is stable with one low-stock alert.",
+      "confidence": 0.86,
+      "healthScore": 72,
+      "riskScore": 38,
+      "openRecommendationCount": 1,
+      "createdAt": "2026-06-19T08:00:00.000Z",
+      "ageHours": 18
+    },
+    {
+      "agentId": "growth_intelligence",
+      "summary": "Growth momentum is positive with retention headroom.",
+      "confidence": 0.84,
+      "healthScore": 68,
+      "riskScore": 32,
+      "openRecommendationCount": 1,
+      "createdAt": "2026-06-19T09:00:00.000Z",
+      "ageHours": 16
+    },
+    {
+      "agentId": "store_audit",
+      "summary": "Store health baseline is acceptable with conversion gaps.",
+      "confidence": 0.82,
+      "healthScore": 74,
+      "riskScore": 28,
+      "openRecommendationCount": 1,
+      "createdAt": "2026-06-19T07:00:00.000Z",
+      "ageHours": 20
+    },
+    {
+      "agentId": "pricing_intelligence",
+      "summary": "Pricing posture supports margin recovery actions.",
+      "confidence": 0.8,
+      "healthScore": 70,
+      "riskScore": 30,
+      "openRecommendationCount": 1,
+      "createdAt": "2026-06-19T06:00:00.000Z",
+      "ageHours": 22
+    }
+  ],
+  "specialistRecommendations": [
+    {
+      "recommendationId": "inventory:replenish-hero-skus",
+      "agentId": "inventory_intelligence",
+      "title": "Replenish hero SKUs before campaign push",
+      "reason": "Low stock on high-velocity products increases stockout risk during promotions.",
+      "category": "Inventory",
+      "priority": 2,
+      "confidence": 0.88,
+      "status": "open"
+    },
+    {
+      "recommendationId": "growth:retention-winback",
+      "agentId": "growth_intelligence",
+      "title": "Launch repeat-buyer win-back sequence",
+      "reason": "Returning customer rate is below target for sustainable revenue expansion.",
+      "category": "Retention",
+      "priority": 2,
+      "confidence": 0.86,
+      "status": "open"
+    },
+    {
+      "recommendationId": "pricing:margin-recovery",
+      "agentId": "pricing_intelligence",
+      "title": "Reduce discount depth on premium SKUs",
+      "reason": "Premium products show room to recover margin without sacrificing velocity.",
+      "category": "Revenue",
+      "priority": 3,
+      "confidence": 0.83,
+      "status": "viewed"
+    }
+  ],
+  "knownRecommendationIds": [
+    "inventory:replenish-hero-skus",
+    "growth:retention-winback",
+    "pricing:margin-recovery"
+  ],
+  "strategySignals": {
+    "alignedAgentCount": 4,
+    "conflictingAgentCount": 0,
+    "openSpecialistRecommendations": 3,
+    "criticalInventoryIssues": 0,
+    "revenueRecoveryCandidates": 1,
+    "growthAccelerationCandidates": 1,
+    "storeHealthGaps": 1,
+    "immediateWinCount": 3,
+    "strategicOpportunityCount": 0,
+    "criticalBlockerCount": 0,
+    "automationCandidateCount": 0
+  },
+  "merchantOperationalPreferences": {
+    "prefersInventoryFirst": false,
+    "prefersRevenueRecovery": true,
+    "prefersGrowthAcceleration": true
+  },
+  "implementedPriorityIds": [],
+  "dismissedPriorityIds": [],
+  "collaborationSummary": "Specialists align on stabilizing inventory before scaling acquisition.",
+  "storeTotals": {
+    "totalRevenue30": 12500,
+    "totalRevenue90": 34200,
+    "revenueGrowthRate": 13.64,
+    "totalOrders30": 48,
+    "openOperations": 2,
+    "blockedOperations": 0,
+    "openAutomations": 1
+  }
+}

@@ -1,11 +1,22 @@
 import { Prisma, type ProductStatus } from "@prisma/client";
 
 import prisma from "../db.server";
+import { unauthenticated } from "../shopify.server";
 import {
-  claimWebhookEvent,
+  assertProductCreateAllowedAtomic,
+  BILLING_LIMIT_EXCEEDED,
+  checkProductCreateAllowed,
+  runProductCreateWithAtomicLimit,
+  toBillingLimitBlockedState,
+} from "./billing-enforcement.server";
+import type { StoreSyncAdminClient } from "./store.server";
+import {
+  classifyProductWebhookSkip,
+  finalizeWebhookClaim,
+  gateWebhookEvent,
+  lookupStoreForWebhook,
   markWebhookEventProcessed,
 } from "./webhook.server";
-import type { StoreSyncAdminClient } from "./store.server";
 
 type ProductDbClient = Pick<typeof prisma, "product">;
 
@@ -17,6 +28,7 @@ const PRODUCTS_QUERY = `#graphql
           id
           title
           status
+          updatedAt
           variants(first: 250) {
             edges {
               node {
@@ -45,12 +57,42 @@ const PRODUCTS_QUERY = `#graphql
   }
 `;
 
+const PRODUCT_BY_ID_QUERY = `#graphql
+  query StorePilotGetProductById($productId: ID!) {
+    product(id: $productId) {
+      id
+      title
+      status
+      updatedAt
+      variants(first: 250) {
+        edges {
+          node {
+            id
+            sku
+            price
+            inventoryQuantity
+            inventoryItem {
+              id
+              tracked
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+`;
+
 const PRODUCT_VARIANTS_QUERY = `#graphql
   query StorePilotGetProductVariants($productId: ID!, $variantCursor: String) {
     product(id: $productId) {
       id
       title
       status
+      updatedAt
       variants(first: 250, after: $variantCursor) {
         edges {
           node {
@@ -92,6 +134,13 @@ export type SyncProductsResult = {
   variantsProcessed: number;
   productPages: number;
   success: boolean;
+  blocked?: boolean;
+  blockedReason?: string;
+  blockedMessage?: string;
+};
+
+export type UpsertVariantRowResult = {
+  action: "created" | "updated" | "limit_exceeded" | "stale_skipped";
 };
 
 type LogLevel = "info" | "warn" | "error";
@@ -110,8 +159,14 @@ type ProductSyncLogContext = {
     | "sync_failed"
     | "graphql_error"
     | "store_ineligible"
-    | "zero_variants";
+    | "zero_variants"
+    | "limit_exceeded"
+    | "sync_reconcile"
+    | "sync_reconcile_skipped"
+    | "product_variants_archived"
+    | "stale_write_skipped";
   reason?: string;
+  shopifyVariantId?: string;
   upserted?: number;
   skipped?: number;
   productsProcessed?: number;
@@ -120,6 +175,9 @@ type ProductSyncLogContext = {
   productId?: string;
   variantCount?: number;
   variantPages?: number;
+  normalizedVariantCount?: number;
+  shopifyVariantCount?: number;
+  archived?: number;
   durationMs?: number;
 };
 
@@ -150,6 +208,7 @@ interface ProductNode {
   id?: string | null;
   title?: string | null;
   status?: string | null;
+  updatedAt?: string | null;
   variants?: {
     edges?: Array<{ node?: ProductVariantNode | null }> | null;
     pageInfo?: VariantConnectionPageInfo | null;
@@ -176,6 +235,18 @@ interface ProductVariantsQueryResponse {
   errors?: GraphQlError[];
 }
 
+interface ProductByIdQueryResponse {
+  data?: {
+    product?: ProductNode | null;
+  };
+  errors?: GraphQlError[];
+}
+
+export type FetchProductByIdResult = {
+  product: ProductNode;
+  variants: ProductVariantNode[];
+};
+
 export type FetchAllVariantsResult = {
   variants: ProductVariantNode[];
   variantPages: number;
@@ -192,6 +263,7 @@ interface NormalizedVariantRow {
   inventoryQuantity: number | null;
   /** Set only by GraphQL sync normalization (`normalizeVariantRow`). */
   inventoryTracked?: boolean;
+  shopifyProductUpdatedAt: Date | null;
 }
 
 export type UpsertVariantSource = "sync" | "webhook";
@@ -211,6 +283,7 @@ export interface ShopifyProductWebhookPayload {
   id?: number | string | null;
   title?: string | null;
   status?: string | null;
+  updated_at?: string | null;
   variants?: ShopifyProductWebhookVariant[] | null;
 }
 
@@ -227,6 +300,9 @@ export type ProductWebhookResult = {
   archived: number;
   skipped: number;
   shopifyProductId?: string;
+  retryable?: boolean;
+  reason?: string;
+  skipReason?: string;
 };
 
 type ProductWebhookLogContext = {
@@ -245,7 +321,11 @@ type ProductWebhookLogContext = {
     | "webhook_failed"
     | "webhook_skipped"
     | "store_ineligible"
-    | "zero_variants";
+    | "zero_variants"
+    | "limit_exceeded"
+    | "product_variants_archived"
+    | "product_not_found"
+    | "graphql_fetch_failed";
   reason?: string;
   shopifyProductId?: string;
   productId?: string;
@@ -339,6 +419,26 @@ export async function graphqlWithRetry(
   throw lastError instanceof Error ? lastError : new Error("GraphQL request failed");
 }
 
+function parseIsoDateTime(value: string | null | undefined): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
+}
+
 export function normalizeVariantRow(
   product: ProductNode,
   variant: ProductVariantNode,
@@ -357,6 +457,7 @@ export function normalizeVariantRow(
     price: variant.price ? new Prisma.Decimal(variant.price) : null,
     inventoryQuantity: variant.inventoryQuantity ?? null,
     inventoryTracked: variant.inventoryItem?.tracked ?? true,
+    shopifyProductUpdatedAt: parseIsoDateTime(product.updatedAt),
   };
 }
 
@@ -365,7 +466,7 @@ export async function upsertVariantRow(
   row: NormalizedVariantRow,
   source: UpsertVariantSource = "sync",
   db: ProductDbClient = prisma,
-): Promise<void> {
+): Promise<UpsertVariantRowResult> {
   if (process.env.PRODUCT_SYNC_SIMULATE_PRISMA_FAILURE === "1") {
     throw new Error(
       "Simulated Prisma failure (PRODUCT_SYNC_SIMULATE_PRISMA_FAILURE)",
@@ -379,7 +480,7 @@ export async function upsertVariantRow(
         shopifyVariantId: row.shopifyVariantId,
       },
     },
-    select: { inventoryTracked: true },
+    select: { inventoryTracked: true, shopifyProductUpdatedAt: true },
   });
 
   const catalogUpdate = {
@@ -391,9 +492,27 @@ export async function upsertVariantRow(
     ...(row.shopifyInventoryItemId != null && {
       shopifyInventoryItemId: row.shopifyInventoryItemId,
     }),
+    ...(row.shopifyProductUpdatedAt != null && {
+      shopifyProductUpdatedAt: row.shopifyProductUpdatedAt,
+    }),
   };
 
   if (existing) {
+    if (
+      row.shopifyProductUpdatedAt &&
+      existing.shopifyProductUpdatedAt &&
+      row.shopifyProductUpdatedAt <= existing.shopifyProductUpdatedAt
+    ) {
+      logProductSync("info", "Product update skipped due to stale Shopify timestamp", {
+        shop: "",
+        storeId,
+        operation: "stale_write_skipped",
+        shopifyVariantId: row.shopifyVariantId,
+      });
+
+      return { action: "stale_skipped" };
+    }
+
     const updateData: Prisma.ProductUpdateInput = { ...catalogUpdate };
 
     if (source === "sync") {
@@ -406,6 +525,32 @@ export async function upsertVariantRow(
       updateData.inventoryQuantity = row.inventoryQuantity;
     }
 
+    if (row.shopifyProductUpdatedAt) {
+      const updated = await db.product.updateMany({
+        where: {
+          storeId,
+          shopifyVariantId: row.shopifyVariantId,
+          OR: [
+            { shopifyProductUpdatedAt: null },
+            { shopifyProductUpdatedAt: { lt: row.shopifyProductUpdatedAt } },
+          ],
+        },
+        data: updateData as Prisma.ProductUpdateManyMutationInput,
+      });
+
+      if (updated.count === 0) {
+        logProductSync("info", "Product update skipped due to stale Shopify timestamp", {
+          shop: "",
+          storeId,
+          operation: "stale_write_skipped",
+          shopifyVariantId: row.shopifyVariantId,
+        });
+        return { action: "stale_skipped" };
+      }
+
+      return { action: "updated" };
+    }
+
     await db.product.update({
       where: {
         storeId_shopifyVariantId: {
@@ -415,7 +560,7 @@ export async function upsertVariantRow(
       },
       data: updateData,
     });
-    return;
+    return { action: "updated" };
   }
 
   let inventoryTracked: boolean;
@@ -429,20 +574,51 @@ export async function upsertVariantRow(
     inventoryQuantity = inventoryTracked ? null : row.inventoryQuantity;
   }
 
-  await db.product.create({
-    data: {
-      storeId,
-      shopifyProductId: row.shopifyProductId,
-      shopifyVariantId: row.shopifyVariantId,
-      shopifyInventoryItemId: row.shopifyInventoryItemId,
-      title: row.title,
-      sku: row.sku,
-      status: row.status,
-      price: row.price,
-      inventoryQuantity,
-      inventoryTracked,
-    },
-  });
+  const createData = {
+    storeId,
+    shopifyProductId: row.shopifyProductId,
+    shopifyVariantId: row.shopifyVariantId,
+    shopifyInventoryItemId: row.shopifyInventoryItemId,
+    title: row.title,
+    sku: row.sku,
+    status: row.status,
+    price: row.price,
+    inventoryQuantity,
+    inventoryTracked,
+    ...(row.shopifyProductUpdatedAt != null && {
+      shopifyProductUpdatedAt: row.shopifyProductUpdatedAt,
+    }),
+  };
+
+  try {
+    return await runProductCreateWithAtomicLimit(db, async (client) => {
+      const limitCheck = await assertProductCreateAllowedAtomic(client, storeId);
+      if (!limitCheck.allowed) {
+        return { action: "limit_exceeded" as const };
+      }
+
+      await client.product.create({ data: createData });
+      return { action: "created" as const };
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const raced = await db.product.findUnique({
+        where: {
+          storeId_shopifyVariantId: {
+            storeId,
+            shopifyVariantId: row.shopifyVariantId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (raced) {
+        return upsertVariantRow(storeId, row, source, db);
+      }
+    }
+
+    throw error;
+  }
 }
 
 export async function fetchProductPage(
@@ -592,6 +768,54 @@ export async function fetchAllVariantsForProduct(
   return { variants, variantPages };
 }
 
+export async function fetchProductById(
+  admin: ProductSyncAdminClient,
+  shop: string,
+  storeId: string,
+  productGid: string,
+): Promise<FetchProductByIdResult | null> {
+  if (process.env.PRODUCT_SYNC_SIMULATE_GRAPHQL_FAILURE === "1") {
+    throw new Error(
+      "Simulated GraphQL failure (PRODUCT_SYNC_SIMULATE_GRAPHQL_FAILURE)",
+    );
+  }
+
+  const response = await graphqlWithRetry(
+    admin,
+    PRODUCT_BY_ID_QUERY,
+    { productId: productGid },
+    { shop, storeId },
+  );
+  const body = (await response.json()) as ProductByIdQueryResponse;
+
+  handleProductSyncGraphqlErrors(body, shop, storeId);
+
+  const product = body.data?.product;
+  if (!product?.id) {
+    return null;
+  }
+
+  const { variants, variantPages } = await fetchAllVariantsForProduct(
+    admin,
+    shop,
+    storeId,
+    product,
+  );
+
+  if (variantPages > 1) {
+    logProductSync("info", "Loaded paginated product variants for webhook fetch", {
+      shop,
+      storeId,
+      operation: "variant_pages_loaded",
+      productId: product.id,
+      variantCount: variants.length,
+      variantPages,
+    });
+  }
+
+  return { product, variants };
+}
+
 async function assertStoreEligible(
   storeId: string,
   shop: string,
@@ -652,8 +876,9 @@ export async function syncProductsFromShopify(
   try {
     let productCursor: string | null = null;
     let hasNextPage = true;
+    let billingLimitReached = false;
 
-    while (hasNextPage) {
+    while (hasNextPage && !billingLimitReached) {
       result.productPages += 1;
 
       const body = await fetchProductPage(
@@ -689,13 +914,34 @@ export async function syncProductsFromShopify(
           product,
         );
 
-        if (variants.length === 0) {
-          logProductSync("warn", "Product has zero variants", {
-            shop,
+        const shopifyVariantCount = variants.length;
+        const activeVariantIds: string[] = [];
+        let normalizedVariantCount = 0;
+
+        if (shopifyVariantCount === 0) {
+          const archived = await reconcileRemovedVariants(
             storeId,
-            operation: "zero_variants",
-            reason: product.id,
-          });
+            product.id,
+            activeVariantIds,
+          );
+
+          if (archived > 0) {
+            logProductSync("info", "Archived variants for zero-variant product", {
+              shop,
+              storeId,
+              operation: "product_variants_archived",
+              productId: product.id,
+              archived,
+            });
+          } else {
+            logProductSync("warn", "Product has zero variants", {
+              shop,
+              storeId,
+              operation: "zero_variants",
+              reason: product.id,
+            });
+          }
+
           continue;
         }
 
@@ -724,9 +970,77 @@ export async function syncProductsFromShopify(
             continue;
           }
 
-          await upsertVariantRow(storeId, row, "sync");
+          const upsertResult = await upsertVariantRow(storeId, row, "sync");
+
+          if (upsertResult.action === "limit_exceeded") {
+            result.skipped += 1;
+            const limitCheck = await checkProductCreateAllowed(storeId);
+            const blockedState = toBillingLimitBlockedState("products", limitCheck);
+            result.blocked = blockedState.blocked;
+            result.blockedReason = blockedState.blockedReason;
+            result.blockedMessage = blockedState.blockedMessage;
+
+            logProductSync("warn", "Product sync blocked by plan limit", {
+              shop,
+              storeId,
+              operation: "limit_exceeded",
+              reason: BILLING_LIMIT_EXCEEDED,
+              skipped: result.skipped,
+              upserted: result.upserted,
+            });
+
+            billingLimitReached = true;
+            break;
+          }
+
+          activeVariantIds.push(row.shopifyVariantId);
+          normalizedVariantCount += 1;
+
+          if (upsertResult.action === "stale_skipped") {
+            continue;
+          }
+
           result.upserted += 1;
         }
+
+        if (billingLimitReached) {
+          break;
+        }
+
+        if (normalizedVariantCount === shopifyVariantCount) {
+          const archived = await reconcileRemovedVariants(
+            storeId,
+            product.id,
+            activeVariantIds,
+          );
+
+          if (archived > 0) {
+            logProductSync("info", "Removed product variants archived during sync", {
+              shop,
+              storeId,
+              operation: "sync_reconcile",
+              productId: product.id,
+              archived,
+            });
+          }
+        } else {
+          logProductSync("warn", "Product sync reconcile skipped", {
+            shop,
+            storeId,
+            operation: "sync_reconcile_skipped",
+            productId: product.id,
+            normalizedVariantCount,
+            shopifyVariantCount,
+          });
+        }
+
+        if (billingLimitReached) {
+          break;
+        }
+      }
+
+      if (billingLimitReached) {
+        break;
       }
 
       hasNextPage = products?.pageInfo?.hasNextPage === true;
@@ -737,12 +1051,14 @@ export async function syncProductsFromShopify(
       }
     }
 
-    await prisma.store.update({
-      where: { id: storeId },
-      data: { lastProductsSyncAt: new Date() },
-    });
+    if (!result.blocked) {
+      await prisma.store.update({
+        where: { id: storeId },
+        data: { lastProductsSyncAt: new Date() },
+      });
+    }
 
-    result.success = true;
+    result.success = !result.blocked && result.skipped === 0;
 
     const durationMs = Date.now() - startedAt;
 
@@ -920,27 +1236,137 @@ export function normalizeWebhookVariantRow(
     status: mapProductStatus(payload.status),
     price: variant.price ? new Prisma.Decimal(variant.price) : null,
     inventoryQuantity: variant.inventory_quantity ?? null,
+    shopifyProductUpdatedAt: parseIsoDateTime(payload.updated_at),
   };
 }
 
 export async function resolveStoreForWebhook(
   shop: string,
 ): Promise<{ storeId: string } | null> {
-  const store = await prisma.store.findUnique({
-    where: { shopifyDomain: shop },
-    select: { id: true, active: true },
-  });
+  const lookup = await lookupStoreForWebhook(shop);
 
-  if (!store?.active) {
+  if (!lookup?.active) {
     logProductWebhook("error", "Store is not eligible for product webhook", {
       shop,
       operation: "store_ineligible",
-      reason: !store ? "store_not_found" : "store_inactive",
+      reason: !lookup ? "store_not_found" : "store_inactive",
     });
     return null;
   }
 
-  return { storeId: store.id };
+  return { storeId: lookup.storeId };
+}
+
+async function beginProductWebhook(
+  input: ProductWebhookInput,
+): Promise<
+  | { kind: "retryable"; reason: "store_not_found" }
+  | { kind: "duplicate" }
+  | { kind: "lease_retry"; storeId: string; reason: string }
+  | { kind: "inactive"; storeId: string; eventId?: string }
+  | { kind: "ready"; storeId: string; eventId?: string; processingOwner: string }
+> {
+  const lookup = await lookupStoreForWebhook(input.shop);
+
+  if (!lookup) {
+    logProductWebhook("warn", "Store not found for product webhook", {
+      shop: input.shop,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "store_ineligible",
+      reason: "store_not_found",
+    });
+
+    return { kind: "retryable", reason: "store_not_found" };
+  }
+
+  const gate = await gateWebhookEvent({
+    shop: input.shop,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    lookup,
+  });
+
+  if (gate.outcome === "duplicate") {
+    logProductWebhook("info", "Duplicate product webhook skipped", {
+      shop: input.shop,
+      storeId: lookup.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "duplicate_webhook",
+    });
+
+    return { kind: "duplicate" };
+  }
+
+  if (gate.outcome === "lease_retry") {
+    logProductWebhook("info", "Product webhook deferred for lease contention", {
+      shop: input.shop,
+      storeId: gate.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: gate.reason,
+    });
+
+    return { kind: "lease_retry", storeId: gate.storeId, reason: gate.reason };
+  }
+
+  if (gate.outcome === "inactive_retry") {
+    logProductWebhook("info", "Product webhook deferred for inactive store", {
+      shop: input.shop,
+      storeId: gate.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "store_inactive",
+    });
+
+    return { kind: "inactive", storeId: gate.storeId };
+  }
+
+  if (gate.outcome !== "ready") {
+    return { kind: "lease_retry", storeId: lookup.storeId, reason: "webhook_gate_not_ready" };
+  }
+
+  return {
+    kind: "ready",
+    storeId: gate.storeId,
+    eventId: gate.eventId,
+    processingOwner: gate.processingOwner,
+  };
+}
+
+function productWebhookSkippedResult(): ProductWebhookResult {
+  return {
+    success: true,
+    upserted: 0,
+    archived: 0,
+    skipped: 1,
+  };
+}
+
+function productWebhookInactiveResult(): ProductWebhookResult {
+  return {
+    success: false,
+    upserted: 0,
+    archived: 0,
+    skipped: 0,
+    retryable: true,
+    reason: "store_inactive",
+  };
+}
+
+function productWebhookLeaseRetryResult(reason: string): ProductWebhookResult {
+  return {
+    success: false,
+    upserted: 0,
+    archived: 0,
+    skipped: 0,
+    retryable: true,
+    reason,
+  };
 }
 
 export async function archiveProductByShopifyId(
@@ -979,6 +1405,252 @@ export async function reconcileRemovedVariants(
   return result.count;
 }
 
+async function applyProductGraphqlWrites(
+  input: ProductWebhookInput,
+  storeId: string,
+  product: ProductNode,
+  variants: ProductVariantNode[],
+  db: ProductDbClient,
+): Promise<Pick<ProductWebhookResult, "upserted" | "archived" | "skipped">> {
+  const shopifyProductId = product.id;
+  if (!shopifyProductId) {
+    throw new Error("missing_product_id");
+  }
+
+  const shopifyVariantCount = variants.length;
+
+  if (shopifyVariantCount === 0) {
+    const archived = await archiveProductByShopifyId(
+      storeId,
+      shopifyProductId,
+      db,
+    );
+
+    logProductWebhook("info", "Archived variants for zero-variant product", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "product_variants_archived",
+      shopifyProductId,
+      archived,
+    });
+
+    return { upserted: 0, archived, skipped: 0 };
+  }
+
+  const activeVariantIds: string[] = [];
+  let upserted = 0;
+  let skipped = 0;
+  let normalizedVariantCount = 0;
+
+  for (const variant of variants) {
+    if (!variant) {
+      skipped += 1;
+      continue;
+    }
+
+    const row = normalizeVariantRow(product, variant);
+    if (!row) {
+      skipped += 1;
+      continue;
+    }
+
+    normalizedVariantCount += 1;
+    activeVariantIds.push(row.shopifyVariantId);
+
+    const upsertResult = await upsertVariantRow(storeId, row, "webhook", db);
+
+    if (upsertResult.action === "limit_exceeded") {
+      skipped += 1;
+      logProductWebhook("warn", "Product webhook create blocked by plan limit", {
+        shop: input.shop,
+        storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "limit_exceeded",
+        reason: BILLING_LIMIT_EXCEEDED,
+        shopifyProductId,
+      });
+      continue;
+    }
+
+    if (upsertResult.action === "stale_skipped") {
+      continue;
+    }
+
+    upserted += 1;
+  }
+
+  logProductWebhook("info", "Product webhook variants upserted from GraphQL", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_upsert",
+    shopifyProductId,
+    upserted,
+    skipped,
+  });
+
+  let archived = 0;
+
+  if (normalizedVariantCount === shopifyVariantCount) {
+    archived = await reconcileRemovedVariants(
+      storeId,
+      shopifyProductId,
+      activeVariantIds,
+      db,
+    );
+
+    if (archived > 0) {
+      logProductWebhook("info", "Removed product variants archived", {
+        shop: input.shop,
+        storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "webhook_reconcile",
+        shopifyProductId,
+        archived,
+      });
+    }
+  } else {
+    logProductWebhook("warn", "Product webhook reconcile skipped", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_reconcile_skipped",
+      productId: shopifyProductId,
+      skippedVariants: shopifyVariantCount - normalizedVariantCount,
+      payloadVariantCount: shopifyVariantCount,
+    });
+  }
+
+  if (mapProductStatus(product.status) === "archived") {
+    archived += await archiveProductByShopifyId(storeId, shopifyProductId, db);
+  }
+
+  return { upserted, archived, skipped };
+}
+
+async function upsertProductFromWebhookGraphql(
+  input: ProductWebhookInput,
+  storeId: string,
+): Promise<ProductWebhookResult> {
+  const startedAt = Date.now();
+  const result: ProductWebhookResult = {
+    success: false,
+    upserted: 0,
+    archived: 0,
+    skipped: 0,
+  };
+
+  const payload = parseProductWebhookPayload(input.payload);
+  if (!payload) {
+    logProductWebhook("warn", "Invalid product webhook payload", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "invalid_payload",
+    });
+    result.success = true;
+    result.skipped += 1;
+    return result;
+  }
+
+  const shopifyProductId = resolveShopifyProductId(payload);
+  if (!shopifyProductId) {
+    logProductWebhook("warn", "Product webhook missing required fields", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "missing_product_fields",
+    });
+    result.success = true;
+    result.skipped += 1;
+    return result;
+  }
+
+  result.shopifyProductId = shopifyProductId;
+
+  const { admin } = await unauthenticated.admin(input.shop);
+  const fetched = await fetchProductById(
+    admin,
+    input.shop,
+    storeId,
+    shopifyProductId,
+  );
+
+  if (!fetched) {
+    logProductWebhook("warn", "Product webhook product not found in GraphQL", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "product_not_found",
+      reason: "product_not_found",
+      shopifyProductId,
+    });
+
+    return {
+      ...result,
+      success: true,
+      skipped: 1,
+      skipReason: "product_not_found",
+    };
+  }
+
+  const writes = await prisma.$transaction(async (tx) =>
+    applyProductGraphqlWrites(
+      input,
+      storeId,
+      fetched.product,
+      fetched.variants,
+      tx,
+    ),
+  );
+
+  result.upserted = writes.upserted;
+  result.archived = writes.archived;
+  result.skipped = writes.skipped;
+  result.success = true;
+
+  const durationMs = Date.now() - startedAt;
+
+  logProductWebhook("info", "Product webhook completed", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_completed",
+    shopifyProductId,
+    upserted: result.upserted,
+    archived: result.archived,
+    skipped: result.skipped,
+    durationMs,
+  });
+
+  logProductWebhook("info", "Product webhook summary", {
+    shop: input.shop,
+    storeId,
+    topic: input.topic,
+    webhookId: input.webhookId,
+    operation: "webhook_summary",
+    shopifyProductId,
+    upserted: result.upserted,
+    archived: result.archived,
+    skipped: result.skipped,
+    durationMs,
+  });
+
+  return result;
+}
+
 async function applyProductWebhookWrites(
   input: ProductWebhookInput,
   storeId: string,
@@ -1002,7 +1674,27 @@ async function applyProductWebhookWrites(
     }
 
     activeVariantIds.push(row.shopifyVariantId);
-    await upsertVariantRow(storeId, row, "webhook", db);
+    const upsertResult = await upsertVariantRow(storeId, row, "webhook", db);
+
+    if (upsertResult.action === "limit_exceeded") {
+      skipped += 1;
+      skippedVariants += 1;
+      logProductWebhook("warn", "Product webhook create blocked by plan limit", {
+        shop: input.shop,
+        storeId,
+        topic: input.topic,
+        webhookId: input.webhookId,
+        operation: "limit_exceeded",
+        reason: BILLING_LIMIT_EXCEEDED,
+        shopifyProductId,
+      });
+      continue;
+    }
+
+    if (upsertResult.action === "stale_skipped") {
+      continue;
+    }
+
     upserted += 1;
   }
 
@@ -1177,31 +1869,6 @@ async function upsertProductFromWebhookPayload(
   return result;
 }
 
-async function claimProductWebhook(
-  input: ProductWebhookInput,
-  storeId: string,
-): Promise<{ duplicate: true } | { duplicate: false; eventId?: string }> {
-  const claim = await claimWebhookEvent({
-    storeId,
-    shop: input.shop,
-    topic: input.topic,
-    webhookId: input.webhookId,
-  });
-
-  if (claim.duplicate) {
-    logProductWebhook("info", "Duplicate product webhook skipped", {
-      shop: input.shop,
-      storeId,
-      topic: input.topic,
-      webhookId: input.webhookId,
-      operation: "webhook_skipped",
-      reason: "duplicate_webhook",
-    });
-  }
-
-  return claim;
-}
-
 export async function handleProductCreateWebhook(
   input: ProductWebhookInput,
 ): Promise<ProductWebhookResult> {
@@ -1212,42 +1879,52 @@ export async function handleProductCreateWebhook(
     operation: "webhook_received",
   });
 
-  const store = await resolveStoreForWebhook(input.shop);
-  if (!store) {
+  const begin = await beginProductWebhook(input);
+
+  if (begin.kind === "retryable") {
     return {
-      success: true,
+      success: false,
       upserted: 0,
       archived: 0,
-      skipped: 1,
+      skipped: 0,
+      retryable: true,
+      reason: begin.reason,
     };
   }
 
-  const claim = await claimProductWebhook(input, store.storeId);
-  if (claim.duplicate) {
-    return {
-      success: true,
-      upserted: 0,
-      archived: 0,
-      skipped: 1,
-    };
+  if (begin.kind === "duplicate") {
+    return productWebhookSkippedResult();
+  }
+
+  if (begin.kind === "inactive") {
+    return productWebhookInactiveResult();
+  }
+
+  if (begin.kind === "lease_retry") {
+    return productWebhookLeaseRetryResult(begin.reason);
   }
 
   try {
     const result = await upsertProductFromWebhookPayload(
       input,
-      store.storeId,
+      begin.storeId,
       false,
+      true,
     );
 
-    if (claim.eventId) {
-      await markWebhookEventProcessed(claim.eventId);
+    if (begin.eventId) {
+      await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
 
     return result;
   } catch (error) {
+    if (begin.eventId && begin.kind === "ready") {
+      await finalizeWebhookClaim(begin.eventId, false, begin.processingOwner);
+    }
+
     logProductWebhook("error", "Product create webhook failed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_failed",
@@ -1267,49 +1944,74 @@ export async function handleProductUpdateWebhook(
     operation: "webhook_received",
   });
 
-  const store = await resolveStoreForWebhook(input.shop);
-  if (!store) {
+  const begin = await beginProductWebhook(input);
+
+  if (begin.kind === "retryable") {
     return {
-      success: true,
+      success: false,
       upserted: 0,
       archived: 0,
-      skipped: 1,
+      skipped: 0,
+      retryable: true,
+      reason: begin.reason,
     };
   }
 
-  const claim = await claimProductWebhook(input, store.storeId);
-  if (claim.duplicate) {
-    return {
-      success: true,
-      upserted: 0,
-      archived: 0,
-      skipped: 1,
-    };
+  if (begin.kind === "duplicate") {
+    return productWebhookSkippedResult();
+  }
+
+  if (begin.kind === "inactive") {
+    return productWebhookInactiveResult();
+  }
+
+  if (begin.kind === "lease_retry") {
+    return productWebhookLeaseRetryResult(begin.reason);
   }
 
   try {
-    const result = await upsertProductFromWebhookPayload(
-      input,
-      store.storeId,
-      true,
-      true,
-    );
+    const result = await upsertProductFromWebhookGraphql(input, begin.storeId);
 
-    if (claim.eventId) {
-      await markWebhookEventProcessed(claim.eventId);
+    if (
+      result.skipReason &&
+      classifyProductWebhookSkip(result.skipReason) === "retriable"
+    ) {
+      await finalizeWebhookClaim(begin.eventId, false, begin.processingOwner);
+      return {
+        success: false,
+        upserted: 0,
+        archived: 0,
+        skipped: 0,
+        retryable: true,
+        reason: result.skipReason,
+      };
+    }
+
+    if (begin.eventId) {
+      await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
 
     return result;
   } catch (error) {
+    await finalizeWebhookClaim(begin.eventId, false, begin.processingOwner);
+
     logProductWebhook("error", "Product update webhook failed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
-      operation: "webhook_failed",
+      operation: "graphql_fetch_failed",
       reason: error instanceof Error ? error.message : "unknown_error",
     });
-    throw error;
+
+    return {
+      success: false,
+      upserted: 0,
+      archived: 0,
+      skipped: 0,
+      retryable: true,
+      reason: "graphql_fetch_failed",
+    };
   }
 }
 
@@ -1325,24 +2027,29 @@ export async function handleProductDeleteWebhook(
     operation: "webhook_received",
   });
 
-  const store = await resolveStoreForWebhook(input.shop);
-  if (!store) {
+  const begin = await beginProductWebhook(input);
+
+  if (begin.kind === "retryable") {
     return {
-      success: true,
+      success: false,
       upserted: 0,
       archived: 0,
-      skipped: 1,
+      skipped: 0,
+      retryable: true,
+      reason: begin.reason,
     };
   }
 
-  const claim = await claimProductWebhook(input, store.storeId);
-  if (claim.duplicate) {
-    return {
-      success: true,
-      upserted: 0,
-      archived: 0,
-      skipped: 1,
-    };
+  if (begin.kind === "duplicate") {
+    return productWebhookSkippedResult();
+  }
+
+  if (begin.kind === "inactive") {
+    return productWebhookInactiveResult();
+  }
+
+  if (begin.kind === "lease_retry") {
+    return productWebhookLeaseRetryResult(begin.reason);
   }
 
   const payload = parseProductWebhookPayload(input.payload);
@@ -1351,15 +2058,15 @@ export async function handleProductDeleteWebhook(
   if (!shopifyProductId) {
     logProductWebhook("warn", "Product delete webhook missing product id", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_skipped",
       reason: "missing_product_id",
     });
 
-    if (claim.eventId) {
-      await markWebhookEventProcessed(claim.eventId);
+    if (begin.eventId) {
+      await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
 
     return {
@@ -1372,17 +2079,17 @@ export async function handleProductDeleteWebhook(
 
   try {
     const archived = await archiveProductByShopifyId(
-      store.storeId,
+      begin.storeId,
       shopifyProductId,
     );
 
-    if (claim.eventId) {
-      await markWebhookEventProcessed(claim.eventId);
+    if (begin.eventId) {
+      await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
 
     logProductWebhook("info", "Product variants archived from delete webhook", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_archive",
@@ -1394,7 +2101,7 @@ export async function handleProductDeleteWebhook(
 
     logProductWebhook("info", "Product webhook completed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_completed",
@@ -1405,7 +2112,7 @@ export async function handleProductDeleteWebhook(
 
     logProductWebhook("info", "Product webhook summary", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_summary",
@@ -1422,9 +2129,11 @@ export async function handleProductDeleteWebhook(
       shopifyProductId,
     };
   } catch (error) {
+    await finalizeWebhookClaim(begin.eventId, false, begin.processingOwner);
+
     logProductWebhook("error", "Product delete webhook failed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: begin.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_failed",

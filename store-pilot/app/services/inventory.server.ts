@@ -2,11 +2,13 @@ import type { Product } from "@prisma/client";
 
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
-import { graphqlWithRetry, resolveStoreForWebhook } from "./product.server";
+import { graphqlWithRetry } from "./product.server";
 import type { StoreSyncAdminClient } from "./store.server";
 import {
-  claimWebhookEvent,
-  markWebhookEventProcessed,
+  classifyInventoryWebhookSkip,
+  finalizeWebhookClaim,
+  gateWebhookEvent,
+  lookupStoreForWebhook,
 } from "./webhook.server";
 
 const INVENTORY_ITEM_LEVELS_QUERY = `#graphql
@@ -57,6 +59,8 @@ export type InventoryWebhookResult = {
   updated: number;
   shopifyInventoryItemId?: string;
   totalAvailable?: number | null;
+  retryable?: boolean;
+  reason?: string;
 };
 
 type InventoryWebhookLogContext = {
@@ -344,11 +348,27 @@ async function completeWebhookSkip(
   input: InventoryWebhookInput,
   storeId: string,
   eventId: string | undefined,
+  processingOwner: string,
   result: InventoryWebhookResult,
   operation: InventoryWebhookLogContext["operation"],
   reason: string,
   startedAt: number,
 ): Promise<InventoryWebhookResult> {
+  if (classifyInventoryWebhookSkip(reason) === "retriable") {
+    logInventoryWebhook("warn", "Inventory webhook retriable skip", {
+      shop: input.shop,
+      storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation,
+      reason,
+      durationMs: Date.now() - startedAt,
+    });
+
+    await finalizeWebhookClaim(eventId, false, processingOwner);
+    throw new Error(`retriable_inventory_webhook_skip:${reason}`);
+  }
+
   logInventoryWebhook("warn", "Inventory webhook skipped", {
     shop: input.shop,
     storeId,
@@ -359,9 +379,7 @@ async function completeWebhookSkip(
     durationMs: Date.now() - startedAt,
   });
 
-  if (eventId) {
-    await markWebhookEventProcessed(eventId);
-  }
+  await finalizeWebhookClaim(eventId, true, processingOwner);
 
   return {
     ...result,
@@ -388,34 +406,36 @@ export async function handleInventoryLevelUpdateWebhook(
     operation: "webhook_received",
   });
 
-  const store = await resolveStoreForWebhook(input.shop);
-  if (!store) {
-    logInventoryWebhook("error", "Store is not eligible for inventory webhook", {
+  const lookup = await lookupStoreForWebhook(input.shop);
+
+  if (!lookup) {
+    logInventoryWebhook("warn", "Store not found for inventory webhook", {
       shop: input.shop,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "store_ineligible",
-      reason: "store_not_found_or_inactive",
+      reason: "store_not_found",
     });
 
     return {
       ...result,
-      success: true,
-      skipped: true,
+      success: false,
+      retryable: true,
+      reason: "store_not_found",
     };
   }
 
-  const claim = await claimWebhookEvent({
-    storeId: store.storeId,
+  const gate = await gateWebhookEvent({
     shop: input.shop,
     topic: input.topic,
     webhookId: input.webhookId,
+    lookup,
   });
 
-  if (claim.duplicate) {
+  if (gate.outcome === "duplicate") {
     logInventoryWebhook("info", "Duplicate inventory webhook skipped", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId: lookup.storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_duplicate",
@@ -429,9 +449,61 @@ export async function handleInventoryLevelUpdateWebhook(
     };
   }
 
+  if (gate.outcome === "lease_retry") {
+    logInventoryWebhook("info", "Inventory webhook deferred for lease contention", {
+      shop: input.shop,
+      storeId: gate.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: gate.reason,
+    });
+
+    return {
+      ...result,
+      success: false,
+      skipped: true,
+      retryable: true,
+      reason: gate.reason,
+    };
+  }
+
+  if (gate.outcome === "inactive_retry") {
+    logInventoryWebhook("info", "Inventory webhook deferred for inactive store", {
+      shop: input.shop,
+      storeId: gate.storeId,
+      topic: input.topic,
+      webhookId: input.webhookId,
+      operation: "webhook_skipped",
+      reason: "store_inactive",
+    });
+
+    return {
+      ...result,
+      success: false,
+      skipped: true,
+      retryable: true,
+      reason: "store_inactive",
+    };
+  }
+
+  if (gate.outcome !== "ready") {
+    return {
+      ...result,
+      success: false,
+      skipped: true,
+      retryable: true,
+      reason: "webhook_gate_not_ready",
+    };
+  }
+
+  const storeId = gate.storeId;
+  const eventId = gate.eventId;
+  const processingOwner = gate.processingOwner;
+
   logInventoryWebhook("info", "Inventory webhook claimed", {
     shop: input.shop,
-    storeId: store.storeId,
+    storeId,
     topic: input.topic,
     webhookId: input.webhookId,
     operation: "webhook_claimed",
@@ -442,8 +514,9 @@ export async function handleInventoryLevelUpdateWebhook(
     if (!parsed) {
       return completeWebhookSkip(
         input,
-        store.storeId,
-        claim.eventId,
+        storeId,
+        eventId,
+        processingOwner,
         result,
         "webhook_skipped",
         "invalid_payload",
@@ -457,7 +530,7 @@ export async function handleInventoryLevelUpdateWebhook(
     result.shopifyInventoryItemId = shopifyInventoryItemId;
 
     let products = await findProductsByInventoryItemId(
-      store.storeId,
+      storeId,
       shopifyInventoryItemId,
     );
 
@@ -465,7 +538,7 @@ export async function handleInventoryLevelUpdateWebhook(
 
     if (products.length === 0) {
       products = await resolveProductsViaGraphqlFallback(
-        store.storeId,
+        storeId,
         input.shop,
         shopifyInventoryItemId,
         admin,
@@ -475,7 +548,7 @@ export async function handleInventoryLevelUpdateWebhook(
     if (products.length === 0) {
       logInventoryWebhook("warn", "No product rows resolved for inventory item", {
         shop: input.shop,
-        storeId: store.storeId,
+        storeId,
         topic: input.topic,
         webhookId: input.webhookId,
         operation: "variant_not_found",
@@ -483,20 +556,12 @@ export async function handleInventoryLevelUpdateWebhook(
         locationId: parsed.location_id ?? undefined,
       });
 
-      if (claim.eventId) {
-        await markWebhookEventProcessed(claim.eventId);
-      }
-
-      return {
-        ...result,
-        success: true,
-        skipped: true,
-      };
+      throw new Error("retriable_inventory_webhook_skip:variant_not_found");
     }
 
     logInventoryWebhook("info", "Inventory webhook variants resolved", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "variant_resolved",
@@ -508,14 +573,28 @@ export async function handleInventoryLevelUpdateWebhook(
     const inventoryState = await fetchInventoryItemInventoryState(
       admin,
       shopifyInventoryItemId,
-      { shop: input.shop, storeId: store.storeId },
+      { shop: input.shop, storeId },
     );
+
+    if (inventoryState.totalAvailable === null) {
+      return completeWebhookSkip(
+        input,
+        storeId,
+        eventId,
+        processingOwner,
+        result,
+        "webhook_skipped",
+        "inventory_item_not_found_in_graphql",
+        startedAt,
+      );
+    }
 
     if (inventoryState.tracked !== true) {
       return completeWebhookSkip(
         input,
-        store.storeId,
-        claim.eventId,
+        storeId,
+        eventId,
+        processingOwner,
         result,
         "webhook_skipped",
         "inventory_not_tracked",
@@ -524,14 +603,14 @@ export async function handleInventoryLevelUpdateWebhook(
     }
 
     const healedCount = await selfHealInventoryTracked(
-      store.storeId,
+      storeId,
       shopifyInventoryItemId,
     );
 
     if (healedCount > 0) {
       logInventoryWebhook("info", "Inventory tracked flag self-healed", {
         shop: input.shop,
-        storeId: store.storeId,
+        storeId,
         topic: input.topic,
         webhookId: input.webhookId,
         operation: "variant_resolved",
@@ -541,30 +620,31 @@ export async function handleInventoryLevelUpdateWebhook(
       });
     }
 
-    if (inventoryState.totalAvailable === null) {
-      return completeWebhookSkip(
-        input,
-        store.storeId,
-        claim.eventId,
-        result,
-        "webhook_skipped",
-        "inventory_item_not_found_in_graphql",
-        startedAt,
-      );
-    }
-
     result.totalAvailable = inventoryState.totalAvailable;
 
     const updatedCount = await updateProductInventoryQuantity(
-      store.storeId,
+      storeId,
       shopifyInventoryItemId,
       inventoryState.totalAvailable,
     );
     result.updated = updatedCount;
 
+    if (updatedCount === 0) {
+      return completeWebhookSkip(
+        input,
+        storeId,
+        eventId,
+        processingOwner,
+        result,
+        "webhook_skipped",
+        "inventory_quantity_not_updated",
+        startedAt,
+      );
+    }
+
     logInventoryWebhook("info", "Inventory quantity updated", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "quantity_updated",
@@ -574,15 +654,13 @@ export async function handleInventoryLevelUpdateWebhook(
       locationId: parsed.location_id ?? undefined,
     });
 
-    if (claim.eventId) {
-      await markWebhookEventProcessed(claim.eventId);
-    }
+    await finalizeWebhookClaim(eventId, true, processingOwner);
 
     const durationMs = Date.now() - startedAt;
 
     logInventoryWebhook("info", "Inventory webhook completed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_completed",
@@ -597,9 +675,11 @@ export async function handleInventoryLevelUpdateWebhook(
       success: true,
     };
   } catch (error) {
+    await finalizeWebhookClaim(eventId, false, processingOwner);
+
     logInventoryWebhook("error", "Inventory webhook failed", {
       shop: input.shop,
-      storeId: store.storeId,
+      storeId,
       topic: input.topic,
       webhookId: input.webhookId,
       operation: "webhook_failed",
@@ -608,4 +688,94 @@ export async function handleInventoryLevelUpdateWebhook(
     });
     throw error;
   }
+}
+
+export type SyncInventoryInput = {
+  storeId: string;
+  shop: string;
+  admin: StoreSyncAdminClient;
+};
+
+export type SyncInventoryResult = {
+  success: boolean;
+  inventoryItemsProcessed: number;
+  variantsUpdated: number;
+  skipped: number;
+};
+
+export async function syncInventoryFromShopify(
+  input: SyncInventoryInput,
+): Promise<SyncInventoryResult> {
+  const store = await prisma.store.findUnique({
+    where: { id: input.storeId },
+    select: { id: true, active: true },
+  });
+
+  if (!store?.active) {
+    logInventoryWebhook("error", "Inventory bootstrap sync store ineligible", {
+      shop: input.shop,
+      storeId: input.storeId,
+      operation: "store_ineligible",
+      reason: !store ? "store_not_found" : "store_inactive",
+    });
+    return {
+      success: false,
+      inventoryItemsProcessed: 0,
+      variantsUpdated: 0,
+      skipped: 0,
+    };
+  }
+
+  const products = await prisma.product.findMany({
+    where: {
+      storeId: input.storeId,
+      inventoryTracked: true,
+      shopifyInventoryItemId: {
+        not: null,
+      },
+    },
+    select: {
+      shopifyInventoryItemId: true,
+    },
+  });
+
+  const inventoryItemIds = [
+    ...new Set(
+      products
+        .map((product) => product.shopifyInventoryItemId)
+        .filter((itemId): itemId is string => itemId !== null),
+    ),
+  ];
+
+  let variantsUpdated = 0;
+  let skipped = 0;
+
+  for (const shopifyInventoryItemId of inventoryItemIds) {
+    const totalAvailable = await fetchTotalAvailableForInventoryItem(
+      input.admin,
+      shopifyInventoryItemId,
+      {
+        shop: input.shop,
+        storeId: input.storeId,
+      },
+    );
+
+    if (totalAvailable === null) {
+      skipped += 1;
+      continue;
+    }
+
+    variantsUpdated += await updateProductInventoryQuantity(
+      input.storeId,
+      shopifyInventoryItemId,
+      totalAvailable,
+    );
+  }
+
+  return {
+    success: skipped === 0,
+    inventoryItemsProcessed: inventoryItemIds.length,
+    variantsUpdated,
+    skipped,
+  };
 }

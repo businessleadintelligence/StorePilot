@@ -18,6 +18,22 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
+  <s-link href="/app/command-center">
+    Command Center
+  </s-link>
+
+  <s-link href="/app/executive">
+    Executive
+  </s-link>
+
+  <s-link href="/app/operations">
+    Operations
+  </s-link>
+
+  <s-link href="/app/automation">
+    Automation
+  </s-link>
+
   <s-link href="/app">
     Dashboard
   </s-link>
@@ -40,6 +56,30 @@ export default function App() {
 
   <s-link href="/app/settings">
     Settings
+  </s-link>
+
+  <s-link href="/app/onboarding">
+    Setup
+  </s-link>
+
+  <s-link href="/app/billing">
+    Billing
+  </s-link>
+
+  <s-link href="/app/system-health">
+    System Health
+  </s-link>
+
+  <s-link href="/app/onboarding">
+    Setup
+  </s-link>
+
+  <s-link href="/app/billing">
+    Billing
+  </s-link>
+
+  <s-link href="/app/system-health">
+    System Health
   </s-link>
 </s-app-nav>
       <Outlet />

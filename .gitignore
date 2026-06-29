@@ -1,2 +1,11 @@
 .vercel
 .env*
+
+# Recovery / stabilization artifacts (local only)
+store-pilot.broken-backup/
+recovery-from-transcript/
+transcript-final/
+test-output*.txt
+typecheck*.txt
+tmp-*.ts
+docs/_recovery/

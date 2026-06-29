@@ -1,6 +1,6 @@
-import prisma from "../app/db.server";
-import { syncProductsFromShopify } from "../app/services/product.server";
-import { unauthenticated } from "../app/shopify.server";
+import prisma from "./app/db.server.js";
+import { syncProductsFromShopify } from "./app/services/product.server.js";
+import { unauthenticated } from "./app/shopify.server.js";
 
 const SHOP = "storepilot-pe9x0muw.myshopify.com";
 const STORE_ID = "d5e9f90a-5485-483e-96a9-cc2b0f39d8ee";

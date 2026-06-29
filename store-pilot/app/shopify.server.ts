@@ -11,11 +11,58 @@ import {
   type Session,
   type Shopify,
 } from "@shopify/shopify-api";
-import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
+
 import prisma from "./db.server";
+import { SHOPIFY_ADMIN_API_VERSION_STRING } from "./shopify-api-version.server";
+import {
+  BootstrapSubscriptionError,
+  ensureSubscriptionForActiveStore,
+} from "./services/billing.server";
+import { EncryptedPrismaSessionStorage } from "./services/encrypted-session-storage.server";
+import {
+  advanceOnboarding,
+  getOrCreateStoreOnboarding,
+} from "./services/onboarding.server";
+import { ensureOrdersSchedulerActive } from "./services/orders-scheduler.server";
+import { ensureStoreBackfillAfterReinstall } from "./services/store-backfill.server";
 import { upsertStoreFromSession } from "./services/store.server";
 import { upsertOwnerFromSession } from "./services/user.server";
-import { scheduleBootstrapProductSync } from "./services/product.server";
+
+const LOG_PREFIX = "[after-auth]";
+
+type LogLevel = "info" | "error";
+
+type AfterAuthLogContext = {
+  shop: string;
+  storeId?: string;
+  operation:
+    | "onboarding_initialized"
+    | "onboarding_advanced"
+    | "onboarding_skipped"
+    | "onboarding_failed"
+    | "webhook_registration_required";
+  reason?: string;
+  action?: string;
+  phase?: string | null;
+  jobId?: string;
+};
+
+function logAfterAuth(
+  level: LogLevel,
+  message: string,
+  context: AfterAuthLogContext,
+): void {
+  const payload = { message, ...context };
+
+  if (level === "error") {
+    console.error(LOG_PREFIX, payload);
+    return;
+  }
+
+  console.info(LOG_PREFIX, payload);
+}
+
+let shopifyAppInstance: ReturnType<typeof shopifyApp>;
 
 const shopifyAppConfig = {
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -24,7 +71,7 @@ const shopifyAppConfig = {
   scopes: process.env.SCOPES?.split(","),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
-  sessionStorage: new PrismaSessionStorage(prisma),
+  sessionStorage: new EncryptedPrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
   future: {
     expiringOfflineAccessTokens: true,
@@ -37,13 +84,34 @@ const shopifyAppConfig = {
       session: Session;
       admin: Parameters<typeof upsertStoreFromSession>[1];
     }) => {
+      if (!session.shop) {
+        logAfterAuth("error", "Session missing shop during afterAuth bootstrap", {
+          shop: "unknown",
+          operation: "onboarding_skipped",
+          reason: "missing_session_shop",
+        });
+        return;
+      }
+
       try {
         await upsertStoreFromSession(session, admin);
       } catch (error) {
-        console.error("[store-sync]", {
-          shop: session.shop ?? "unknown",
-          operation: "after_auth",
-          reason: error instanceof Error ? error.message : "unknown_error",
+        logAfterAuth("error", "Store upsert failed during afterAuth bootstrap", {
+          shop: session.shop,
+          operation: "onboarding_skipped",
+          reason:
+            error instanceof Error ? error.message : "store_upsert_failed",
+        });
+        return;
+      }
+
+      try {
+        await shopifyAppInstance.registerWebhooks({ session });
+      } catch (error) {
+        logAfterAuth("error", "Webhook runtime registration failed; continuing bootstrap", {
+          shop: session.shop,
+          operation: "webhook_registration_required",
+          reason: error instanceof Error ? error.message : "webhook_registration_failed",
         });
       }
 
@@ -51,16 +119,59 @@ const shopifyAppConfig = {
         await upsertOwnerFromSession(session, admin);
       } catch (error) {
         console.error("[user-sync]", {
-          shop: session.shop ?? "unknown",
+          shop: session.shop,
           operation: "after_auth",
           reason: error instanceof Error ? error.message : "unknown_error",
         });
       }
 
-      if (session.shop) {
-        scheduleBootstrapProductSync({
+      try {
+        const store = await prisma.store.findUnique({
+          where: { shopifyDomain: session.shop },
+          select: { id: true, active: true },
+        });
+
+        if (!store?.active) {
+          logAfterAuth("error", "Store is not eligible for onboarding bootstrap", {
+            shop: session.shop,
+            operation: "onboarding_skipped",
+            reason: !store ? "store_not_found" : "store_inactive",
+          });
+          return;
+        }
+
+        await ensureSubscriptionForActiveStore(store.id);
+        await getOrCreateStoreOnboarding(store.id);
+        await ensureStoreBackfillAfterReinstall(store.id);
+        await ensureOrdersSchedulerActive(store.id);
+
+        logAfterAuth("info", "Store onboarding initialized", {
           shop: session.shop,
-          admin,
+          storeId: store.id,
+          operation: "onboarding_initialized",
+        });
+
+        const advanceResult = await advanceOnboarding({ storeId: store.id });
+        logAfterAuth("info", "Store onboarding advanced", {
+          shop: session.shop,
+          storeId: store.id,
+          operation: "onboarding_advanced",
+          action: advanceResult.action,
+          phase: advanceResult.phase,
+          jobId: advanceResult.jobId,
+        });
+      } catch (error) {
+        const reason =
+          error instanceof BootstrapSubscriptionError
+            ? error.reason
+            : error instanceof Error
+              ? error.message
+              : "unknown_error";
+
+        logAfterAuth("error", "Store onboarding bootstrap failed", {
+          shop: session.shop,
+          operation: "onboarding_failed",
+          reason,
         });
       }
     },
@@ -91,14 +202,31 @@ function createWebhookValidationApi(
 }
 
 const webhookValidationApi = createWebhookValidationApi(shopifyAppConfig);
-const shopify = shopifyApp(shopifyAppConfig);
+shopifyAppInstance = shopifyApp(shopifyAppConfig);
+const shopify = shopifyAppInstance;
 
 export type ValidatedWebhookRequest = {
   shop: string;
   topic: string;
   payload: Record<string, unknown>;
   webhookId: string;
+  webhookTriggeredAt?: Date;
 };
+
+function parseWebhookTriggeredAt(request: Request): Date | undefined {
+  const raw = request.headers.get("X-Shopify-Triggered-At");
+
+  if (!raw) {
+    return undefined;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed;
+}
 
 export async function validateWebhookRequest(
   request: Request,
@@ -132,6 +260,7 @@ export async function validateWebhookRequest(
   }
 
   const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const webhookTriggeredAt = parseWebhookTriggeredAt(request);
 
   if (check.webhookType === WebhookType.Webhooks) {
     return {
@@ -139,6 +268,7 @@ export async function validateWebhookRequest(
       topic: check.topic,
       payload,
       webhookId: check.webhookId,
+      webhookTriggeredAt,
     };
   }
 
@@ -147,11 +277,13 @@ export async function validateWebhookRequest(
     topic: check.topic,
     payload,
     webhookId: check.eventId,
+    webhookTriggeredAt,
   };
 }
 
 export default shopify;
 export const apiVersion = ApiVersion.October25;
+export const apiVersionString = SHOPIFY_ADMIN_API_VERSION_STRING;
 export const addDocumentResponseHeaders = shopify.addDocumentResponseHeaders;
 export const authenticate = shopify.authenticate;
 export const unauthenticated = shopify.unauthenticated;
