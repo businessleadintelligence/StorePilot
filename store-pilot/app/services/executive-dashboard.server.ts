@@ -652,7 +652,7 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
     []
   )
     .slice(0, 6)
-    .map((item, index) => ({
+    .map((item, _index) => ({
       label: item.title.slice(0, 14),
       value: item.urgency,
     }));
@@ -769,7 +769,7 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
     capitalLocked.push({ label: "Current", value: 0 });
   }
 
-  const inventoryTimeline = inventoryResults.map((entry, index) => ({
+  const inventoryTimeline = inventoryResults.map((entry, _index) => ({
     label: new Date(entry.createdAt).toISOString().slice(5, 10),
     value: decimalToNumber((entry.resultJson as Record<string, unknown>).inventoryHealthScore),
   }));
@@ -836,7 +836,7 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
     { label: "Mobile", value: decimalToNumber(latestStoreAuditResult?.mobileScore) < 70 ? 1 : 0 },
   ];
 
-  const storeAuditRecommendationTrend = storeAuditResults.map((entry, index) => ({
+  const storeAuditRecommendationTrend = storeAuditResults.map((entry, _index) => ({
     label: new Date(entry.createdAt).toISOString().slice(5, 10),
     value: Array.isArray((entry.resultJson as Record<string, unknown>).recommendations)
       ? ((entry.resultJson as Record<string, unknown>).recommendations as unknown[]).length
@@ -925,7 +925,7 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
 
   const categoryTrendChart = emergingProductsTrend;
 
-  const trendTimeline = trendResults.map((entry, index) => ({
+  const trendTimeline = trendResults.map((entry, _index) => ({
     label: new Date(entry.createdAt).toISOString().slice(5, 10),
     value: decimalToNumber((entry.resultJson as Record<string, unknown>).trendHealthScore),
   }));

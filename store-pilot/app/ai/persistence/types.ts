@@ -131,7 +131,7 @@ export interface MemoryRepository {
 }
 
 export interface ResultCacheRepository {
-  lookup<T = unknown>(input: {
+  lookup<_T = unknown>(input: {
     storeId: string;
     agentId: string;
     subjectKey: string;

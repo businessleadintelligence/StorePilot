@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { AUTOMATION_TEMPLATES } from "../../automation/automation-templates";
-import { ORDERS_QUERY } from "../orders.server";
-import { ORDER_BY_ID_QUERY } from "../orders.server";
+import { ORDERS_QUERY , ORDER_BY_ID_QUERY } from "../orders.server";
 import {
   assertFactsFreeOfCustomerPii,
   findProhibitedPiiFieldPaths,

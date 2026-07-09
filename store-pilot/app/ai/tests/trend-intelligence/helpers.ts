@@ -128,78 +128,119 @@ export function buildValidTrendIntelligenceDraft(
     | "seasonalSignals"
   >,
 ): TrendIntelligenceOutput {
-  const emerging = facts.products.find((product) => product.productId === "product-1");
-  const declining = facts.products.find((product) => product.productId === "product-2");
+  const emerging = facts.products.find(
+    (product) =>
+      facts.emergingProductIds.includes(product.productId) && product.direction === "emerging",
+  );
+  const declining = facts.products.find(
+    (product) =>
+      facts.decliningProductIds.includes(product.productId) && product.direction === "declining",
+  );
+
+  const recommendations: TrendIntelligenceOutput["recommendations"] = [];
+
+  if (emerging) {
+    recommendations.push({
+      id: `trend:restock-${emerging.productId}`,
+      category: "Emerging Opportunity",
+      title: `Increase inventory for ${emerging.title} before demand outpaces supply`,
+      reason: `${emerging.title} shows emerging momentum with recent weekly sales outpacing the 30-day baseline.`,
+      evidenceKeys: [
+        "emerging_product_count",
+        `product_${emerging.productId}_momentum`,
+        "average_momentum",
+      ],
+      merchantAction: [
+        `Increase ${emerging.title} purchase order quantity for the next replenishment cycle`,
+        `Feature ${emerging.title} in homepage and collection merchandising`,
+      ],
+      expectedResult: "Capture emerging demand before stockouts reduce conversion",
+      estimatedImpact: "Protect revenue from an accelerating SKU",
+      difficulty: "Easy",
+      priority: 2,
+      confidence: 0.91,
+      verificationCriteria: `${emerging.title} sales increase after inventory and merchandising updates`,
+      timeline: "1-2 weeks",
+      productId: emerging.productId,
+    });
+  }
+
+  if (declining) {
+    recommendations.push({
+      id: `trend:discount-${declining.productId}`,
+      category: "Declining Demand",
+      title: `Run a targeted ${declining.title} recovery offer`,
+      reason: `${declining.title} is declining against prior demand, leaving excess inventory at risk of dead stock.`,
+      evidenceKeys: ["declining_product_count", "trend_direction", "risk_level"],
+      merchantAction: [
+        `Launch a limited-time ${declining.title} discount to recover velocity`,
+        `Bundle ${declining.title} with ${emerging?.title ?? "a top seller"} to move remaining units`,
+      ],
+      expectedResult: "Stabilize sales and reduce excess inventory",
+      estimatedImpact: "Recover slowing SKU demand before inventory locks capital",
+      difficulty: "Medium",
+      priority: 2,
+      confidence: 0.84,
+      verificationCriteria: `${declining.title} sales stabilize or improve within 21 days`,
+      timeline: "2-3 weeks",
+      productId: declining.productId,
+    });
+  }
+
+  if (recommendations.length === 0 && facts.products[0]) {
+    const product = facts.products[0];
+    recommendations.push({
+      id: `trend:monitor-${product.productId}`,
+      category: "Seasonal Trend",
+      title: `Monitor ${product.title} trend signals`,
+      reason: `${product.title} requires continued monitoring against the current ${facts.trendDirection} store trend.`,
+      evidenceKeys: ["trend_direction", "trend_health_score", "average_momentum"],
+      merchantAction: [`Review weekly sales for ${product.title}`, "Adjust merchandising if velocity shifts"],
+      expectedResult: "Maintain visibility on trend movement",
+      estimatedImpact: "Avoid missing early trend shifts",
+      difficulty: "Easy",
+      priority: 3,
+      confidence: 0.75,
+      verificationCriteria: `${product.title} trend remains within expected range`,
+      timeline: "2 weeks",
+      productId: product.productId,
+    });
+  }
+
+  const findings: TrendIntelligenceOutput["findings"] = [];
+  if (emerging) {
+    findings.push({
+      id: `trend-${emerging.productId}-emerging`,
+      category: "Emerging Opportunity",
+      title: `${emerging.title} demand is accelerating`,
+      detail: `Recent weekly sales for ${emerging.title} are outpacing the 30-day baseline.`,
+      severity: "high",
+      confidence: 0.9,
+    });
+  }
+  if (declining) {
+    findings.push({
+      id: `trend-${declining.productId}-declining`,
+      category: "Declining Demand",
+      title: `${declining.title} demand is slowing`,
+      detail: `${declining.title} weekly sales have fallen below the prior 30-day baseline.`,
+      severity: "medium",
+      confidence: 0.86,
+    });
+  }
 
   return {
-    summary:
-      "Blue Hoodie shows emerging demand while Beanie Hat is slowing, creating a mixed but actionable trend picture.",
+    summary: emerging && declining
+      ? `${emerging.title} shows emerging demand while ${declining.title} is slowing, creating a mixed but actionable trend picture.`
+      : `Store trend direction is ${facts.trendDirection} with ${facts.products.length} tracked products.`,
     priority: 2,
     confidence: 0.88,
     trendHealthScore: facts.trendHealthScore,
     trendDirection: facts.trendDirection,
-    findings: [
-      {
-        id: "trend-blue-hoodie-emerging",
-        category: "Emerging Opportunity",
-        title: "Blue Hoodie demand is accelerating",
-        detail: "Recent weekly sales for Blue Hoodie are outpacing the 30-day baseline.",
-        severity: "high",
-        confidence: 0.9,
-      },
-      {
-        id: "trend-beanie-declining",
-        category: "Declining Demand",
-        title: "Beanie Hat demand is slowing",
-        detail: "Beanie Hat weekly sales have fallen below the prior 30-day baseline.",
-        severity: "medium",
-        confidence: 0.86,
-      },
-    ],
-    recommendations: [
-      {
-        id: "trend:restock-blue-hoodie",
-        category: "Emerging Opportunity",
-        title: "Increase inventory for Blue Hoodie before demand outpaces supply",
-        reason:
-          "Blue Hoodie shows emerging momentum with recent weekly sales outpacing the 30-day baseline and low inventory coverage.",
-        evidenceKeys: ["emerging_product_count", "product_product-1_momentum", "average_momentum"],
-        merchantAction: [
-          "Increase Blue Hoodie purchase order quantity for the next replenishment cycle",
-          "Feature Blue Hoodie in homepage and collection merchandising",
-        ],
-        expectedResult: "Capture emerging hoodie demand before stockouts reduce conversion",
-        estimatedImpact: "Protect revenue from an accelerating SKU",
-        difficulty: "Easy",
-        priority: 2,
-        confidence: 0.91,
-        verificationCriteria: "Blue Hoodie sales increase after inventory and merchandising updates",
-        timeline: "1-2 weeks",
-        productId: emerging?.productId ?? "product-1",
-      },
-      {
-        id: "trend:discount-beanie",
-        category: "Declining Demand",
-        title: "Run a targeted Beanie Hat recovery offer",
-        reason:
-          "Beanie Hat is declining against prior demand, leaving excess inventory at risk of dead stock.",
-        evidenceKeys: ["declining_product_count", "trend_direction", "risk_level"],
-        merchantAction: [
-          "Launch a limited-time Beanie Hat discount to recover velocity",
-          "Bundle Beanie Hat with Blue Hoodie to move remaining units",
-        ],
-        expectedResult: "Stabilize Beanie Hat sales and reduce excess inventory",
-        estimatedImpact: "Recover slowing SKU demand before inventory locks capital",
-        difficulty: "Medium",
-        priority: 2,
-        confidence: 0.84,
-        verificationCriteria: "Beanie Hat sales stabilize or improve within 21 days",
-        timeline: "2-3 weeks",
-        productId: declining?.productId ?? "product-2",
-      },
-    ],
-    risks: ["Beanie Hat may become dead stock if decline continues"],
-    opportunities: ["Blue Hoodie can capture incremental revenue with replenishment"],
+    findings,
+    recommendations,
+    risks: declining ? [`${declining.title} may become dead stock if decline continues`] : [],
+    opportunities: emerging ? [`${emerging.title} can capture incremental revenue with replenishment`] : [],
     emergingProducts: facts.products
       .filter((product) => facts.emergingProductIds.includes(product.productId))
       .map((product) => ({

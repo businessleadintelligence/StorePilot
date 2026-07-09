@@ -7,8 +7,6 @@ import {
   STORE_ID,
   VARIANT_GID,
   VARIANT_GID_2,
-  buildOrderNode,
-  mockOrderByIdResponse,
   testHarness,
 } from "./helpers/fixtures";
 import { handleOrderCreateWebhook } from "../orders.server";

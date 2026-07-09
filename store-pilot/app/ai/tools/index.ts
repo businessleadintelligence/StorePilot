@@ -110,8 +110,12 @@ export * from "./landing-page-growth-tool";
 export * from "./merchandising-tool";
 export * from "./growth-risk-tool";
 export * from "./growth-health-tool";
-export * from "./growth-ranking-tool";
 export * from "./growth-priority-tool";
+export {
+  deriveGrowthOverallConfidence,
+  deriveGrowthOverallPriority,
+  rankGrowthRecommendations,
+} from "./growth-ranking-tool";
 export * from "./growth-group-tool";
 export * from "./growth-impact-tool";
 export * from "./growth-similarity-tool";

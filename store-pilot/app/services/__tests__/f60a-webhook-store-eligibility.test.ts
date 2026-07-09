@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { STORE_ID, SHOP, testHarness } from "./helpers/fixtures";
+import { SHOP, testHarness } from "./helpers/fixtures";
 import { handleInventoryLevelUpdateWebhook } from "../inventory.server";
 import { handleOrderCreateWebhook } from "../orders.server";
 import {

@@ -1759,7 +1759,7 @@ const prismaMock = vi.hoisted(() => ({
         data: Partial<MockWebhookEvent>;
       }) => {
         let count = 0;
-        const now = new Date();
+        const _now = new Date();
 
         for (const event of dbState.webhookEventsById.values()) {
           if (where.id && event.id !== where.id) {
@@ -2810,7 +2810,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(
       async ({
         where,
-        orderBy,
+        orderBy: _orderBy,
       }: {
         where: { storeId?: string };
         orderBy?: { updatedAt: "desc" };
@@ -3136,6 +3136,7 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(async () => []),
     findFirst: vi.fn(async () => null),
     count: vi.fn(async () => 0),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(
       async ({
         create,
@@ -3163,11 +3164,13 @@ const prismaMock = vi.hoisted(() => ({
   aiAgentResult: {
     findFirst: vi.fn(async () => null),
     findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
   },
   aiAgentRun: {
     findFirst: vi.fn(async () => null),
     findMany: vi.fn(async () => []),
     count: vi.fn(async () => 0),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
     aggregate: vi.fn(async () => ({
       _avg: { latencyMs: null },
       _sum: { estimatedCostUsd: null },
@@ -3176,6 +3179,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   aiMemoryRecord: {
     findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
       id: crypto.randomUUID(),
       ...create,
@@ -3183,6 +3187,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   aiResultCacheEntry: {
     findUnique: vi.fn(async () => null),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
       id: crypto.randomUUID(),
       ...create,

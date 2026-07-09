@@ -5,7 +5,6 @@ import { STORE_ID, seedUsageMetricForTests, testHarness } from "./helpers/fixtur
 import {
   createTrialSubscription,
   getCurrentUsageMonth,
-  recordUsage,
 } from "../billing.server";
 import {
   checkUsageLimit,

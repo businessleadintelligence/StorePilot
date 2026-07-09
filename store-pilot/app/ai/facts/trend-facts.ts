@@ -8,7 +8,6 @@ import { calculateRollingGrowth } from "../tools/growth-rate-tool";
 import { detectOpportunityGaps } from "../tools/opportunity-gap-tool";
 import { buildProductTrend, rankProductTrends, type ProductTrendEntry } from "../tools/product-trend-tool";
 import { detectSeasonality } from "../tools/seasonality-tool";
-import { calculateMomentum } from "../tools/momentum-tool";
 import { assessTrendRisk } from "../tools/trend-risk-tool";
 import { calculateTrendScore } from "../tools/trend-score-tool";
 import { calculateTrendHealthScore } from "../tools/trend-health-tool";

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { buildMockPricingScores } from "./helpers";
-import { PRICING_INTELLIGENCE_CATEGORIES } from "../../schemas/pricing-intelligence";
+import { PRICING_INTELLIGENCE_CATEGORIES , buildPricingIntelligenceDeliverableFields } from "../../schemas/pricing-intelligence";
 import { analyzePricingMargin } from "../../tools/pricing-margin-tool";
 import { analyzePricingDiscount } from "../../tools/pricing-discount-tool";
-import { analyzePricingElasticity } from "../../tools/pricing-elasticity-tool";
 import { analyzePricingPsychology } from "../../tools/pricing-psychology-tool";
 import { analyzePricingPremium } from "../../tools/pricing-premium-tool";
 import { analyzePricingCompetition } from "../../tools/pricing-competition-tool";
@@ -16,7 +15,6 @@ import { analyzePricingConversion } from "../../tools/pricing-conversion-tool";
 import { analyzePricingBundle } from "../../tools/pricing-bundle-tool";
 import { analyzePricingRisk, analyzePriceConsistency } from "../../tools/pricing-risk-tool";
 import { calculatePricingIntelligenceHealthScore } from "../../tools/pricing-health-tool";
-import { buildPricingIntelligenceDeliverableFields } from "../../schemas/pricing-intelligence";
 
 const PRICING_AREA_RUNNERS: Record<string, () => { score?: number; marginPercent?: number; demandScore?: number; priceConsistencyScore?: number; issues: string[] }> = {
   "Margin Protection": () =>

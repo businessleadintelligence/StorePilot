@@ -1,5 +1,5 @@
-import type { InventoryEstimatedImpact } from "../schemas/inventory-intelligence";
-import type { InventoryIntelligenceCategory } from "../schemas/inventory-intelligence";
+import type { InventoryEstimatedImpact , InventoryIntelligenceCategory } from "../schemas/inventory-intelligence";
+
 
 export function estimateInventoryRecommendationImpact(input: {
   category: InventoryIntelligenceCategory;

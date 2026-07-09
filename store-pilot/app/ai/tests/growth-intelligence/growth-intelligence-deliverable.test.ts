@@ -1,8 +1,8 @@
 ﻿import { describe, expect, it } from "vitest";
 import { buildGrowthIntelligenceDeliverableFields } from "../../schemas/growth-intelligence";
-import { enrichGrowthIntelligenceOutput } from "../../agents/growth-intelligence-enrichment";
+import { enrichGrowthIntelligenceOutput , mutateAndEnrichGrowthIntelligenceOutput } from "../../agents/growth-intelligence-enrichment";
 import { buildGrowthIntelligenceFactsFromSnapshot, buildValidGrowthIntelligenceDraft } from "./helpers";
-import { mutateAndEnrichGrowthIntelligenceOutput } from "../../agents/growth-intelligence-enrichment";
+
 
 describe("Growth intelligence deliverable schema fields", () => {
   it("builds quick wins and critical risks from recommendations", () => {

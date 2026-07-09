@@ -4,14 +4,14 @@ import { AIPlatformError } from "../../core/ai-errors";
 import {
   buildGrowthIntelligenceFactsFromSnapshot,
   buildValidGrowthIntelligenceDraft,
-} from "./helpers";
+ createMockGrowthIntelligenceSnapshot } from "./helpers";
 import {
   isVagueGrowthRecommendationText,
   validateGrowthIntelligenceBusinessRules,
 } from "../../agents/growth-intelligence.validator";
 import { mutateAndEnrichGrowthIntelligenceOutput } from "../../agents/growth-intelligence-enrichment";
 import { createGrowthIntelligenceFactsBuilder } from "../../facts/growth-intelligence-facts";
-import { createMockGrowthIntelligenceSnapshot } from "./helpers";
+
 
 describe("Growth Intelligence validator", () => {
   it("rejects health score mismatch", async () => {

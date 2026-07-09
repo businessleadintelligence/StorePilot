@@ -1,10 +1,5 @@
 -- F.6.18 high severity elimination
+-- Dependency repair: sync_jobs / store_onboarding ALTERs moved to 20260621225938_add_async_jobs_foundation
 
 ALTER TABLE "stores"
 ADD COLUMN "firstTrialStartedAt" TIMESTAMPTZ;
-
-ALTER TABLE "sync_jobs"
-ADD COLUMN "workerGeneration" INTEGER NOT NULL DEFAULT 0;
-
-ALTER TABLE "store_onboarding"
-ADD COLUMN "ownershipRepairPending" BOOLEAN NOT NULL DEFAULT false;

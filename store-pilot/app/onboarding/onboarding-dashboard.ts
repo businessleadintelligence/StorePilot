@@ -154,7 +154,7 @@ async function buildExecutiveBriefing(
     return null;
   }
 
-  const [metrics, syncStatus, onboarding, healthBadge] = await Promise.all([
+  const [metrics, , onboarding, healthBadge] = await Promise.all([
     getStoreMetrics(storeId),
     getStoreSyncStatus(storeId),
     getOnboardingStatus(storeId),

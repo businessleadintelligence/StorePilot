@@ -1,6 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 
-import { buildMockGrowthScores } from "./helpers";
+import { buildMockGrowthScores , buildGrowthIntelligenceFactsFromSnapshot } from "./helpers";
 import { GROWTH_INTELLIGENCE_GROUPS, GROWTH_INTELLIGENCE_CATEGORIES } from "../../schemas/growth-intelligence";
 import { analyzeGrowthRetention, analyzeGrowthAov } from "../../tools/growth-section-tool";
 import { calculateGrowthIntelligenceHealthScore } from "../../tools/growth-health-tool";
@@ -8,7 +8,7 @@ import { estimateGrowthImpact } from "../../tools/growth-impact-tool";
 import { assignGrowthRecommendationGroup } from "../../tools/growth-group-tool";
 import { areGrowthRecommendationsSimilar } from "../../tools/growth-similarity-tool";
 import { buildGrowthIntelligenceEvidenceCatalog } from "../../agents/growth-intelligence-evidence";
-import { buildGrowthIntelligenceFactsFromSnapshot } from "./helpers";
+
 
 describe("Growth intelligence tool matrix", () => {
   for (const category of GROWTH_INTELLIGENCE_CATEGORIES) {

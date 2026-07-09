@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 
-import { secureCompareStrings } from "../lib/secure-compare.server";
+import { isAuthorizedCronRequest } from "../services/cron-auth.server";
 import {
   getCronWorkerHealth,
   logCronWorkerStartupHealth,
@@ -51,23 +51,6 @@ function methodNotAllowedResponse(): Response {
   return new Response("Method Not Allowed", { status: 405 });
 }
 
-function isAuthorizedCronRequest(request: Request): {
-  authorized: boolean;
-  reason?: string;
-} {
-  const health = getCronWorkerHealth();
-
-  if (!health.cronSecretConfigured) {
-    return { authorized: false, reason: "CRON_SECRET_missing" };
-  }
-
-  const providedSecret = request.headers.get("x-cron-secret");
-  if (!secureCompareStrings(providedSecret, process.env.CRON_SECRET ?? null)) {
-    return { authorized: false, reason: "invalid_cron_secret" };
-  }
-
-  return { authorized: true };
-}
 
 function unauthorizedResponse(reason: string): Response {
   const health = getCronWorkerHealth();
@@ -103,6 +86,46 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   if (request.method !== "GET" && request.method !== "POST") {
     return methodNotAllowedResponse();
+  }
+
+  const authorization = isAuthorizedCronRequest(request);
+  if (authorization.authorized) {
+    const workerId = `cron-worker-${Date.now()}`;
+
+    logCronWorker("info", "Cron worker cycle started", {
+      workerId,
+      operation: "cron_worker_started",
+    });
+
+    try {
+      const result = await runWorkerCycle(workerId);
+
+      logCronWorker("info", "Cron worker cycle completed", {
+        workerId,
+        operation: "cron_worker_completed",
+        status: result.processed?.status,
+      });
+
+      return Response.json({
+        success: true,
+        workerId: result.workerId,
+        processed: result.processed,
+        health: getCronWorkerHealth(),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_error";
+
+      logCronWorker("error", "Cron worker cycle failed", {
+        workerId,
+        operation: "cron_worker_failed",
+        reason,
+      });
+
+      return Response.json(
+        { success: false, error: "Worker cycle failed", reason },
+        { status: 500 },
+      );
+    }
   }
 
   const health = getCronWorkerHealth();

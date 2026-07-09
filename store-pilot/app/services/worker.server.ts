@@ -29,6 +29,11 @@ import {
   nextOrdersIncrementalAvailableAt,
   scheduleOrdersIncrementalSync,
 } from "./orders-scheduler.server";
+import {
+  executeExecutiveBriefJob,
+  executeMetricsRecomputeJob,
+  executeRecommendationsGenerateJob,
+} from "./cron-jobs.server";
 import { syncProductsFromShopify } from "./product.server";
 import type { StoreSyncAdminClient } from "./store.server";
 import { assertStartupReadiness } from "./startup-readiness.server";
@@ -671,6 +676,21 @@ async function executeKnownJob(
           );
         }
 
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.executive_brief_generate: {
+        await executeExecutiveBriefJob(job.storeId);
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.metrics_recompute: {
+        await executeMetricsRecomputeJob(job.storeId);
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.recommendations_generate: {
+        await executeRecommendationsGenerateJob(job.storeId);
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.founder_maintenance: {
         return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
       }
       default:

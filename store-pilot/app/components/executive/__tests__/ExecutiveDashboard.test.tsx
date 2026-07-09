@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
-import { ExecutiveDashboard } from "../../components/executive/ExecutiveDashboard";
+import { ExecutiveDashboard } from "../ExecutiveDashboard";
 import type { ExecutiveDashboardData } from "../../services/executive-dashboard.server";
 
 const dashboard: ExecutiveDashboardData = {

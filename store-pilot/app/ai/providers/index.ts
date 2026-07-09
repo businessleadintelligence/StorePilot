@@ -1,7 +1,7 @@
 import { loadAIConfig } from "../core/ai-config";
 import { AIPlatformError } from "../core/ai-errors";
 import type { AIProvider } from "../core/ai-provider";
-import { OpenAIProvider, createOpenAIProvider } from "./openai/openai-provider";
+import { createOpenAIProvider } from "./openai/openai-provider";
 
 export type ProviderRegistry = {
   getProvider(providerId: string): AIProvider;

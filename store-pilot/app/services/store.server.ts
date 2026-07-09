@@ -2,7 +2,6 @@ import type { Session } from "@shopify/shopify-api";
 
 import prisma from "../db.server";
 import {
-  decryptSecretToken,
   encryptSecretToken,
 } from "./token-crypto.server";
 import { terminateSubscriptionOnUninstall } from "./billing.server";

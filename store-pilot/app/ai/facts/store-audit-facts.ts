@@ -2,7 +2,6 @@ import { buildFactFingerprint } from "../cache/fingerprint";
 import {
   getBehaviorMetrics,
   getPerformanceMetrics,
-  getRevenueMetrics,
 } from "../migration/unified-metrics-migration";
 import type { UnifiedStoreMetrics } from "../../connectors/normalization/normalized-metrics";
 import { analyzeStoreSpeed } from "../tools/store-speed-tool";

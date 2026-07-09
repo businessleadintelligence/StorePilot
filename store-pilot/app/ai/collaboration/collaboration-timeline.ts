@@ -1,5 +1,4 @@
-import type { CollaborationOutput } from "./collaboration-types";
-import type { CollaborationChartData } from "./collaboration-types";
+import type { CollaborationOutput , CollaborationChartData } from "./collaboration-types";
 import { agentLabel } from "./collaboration-utils";
 
 export function buildCollaborationTimelineEvents(output: CollaborationOutput) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMockPricingScores } from "./helpers";
+import { buildMockPricingScores , buildPricingIntelligenceFactsFromSnapshot } from "./helpers";
 import { PRICING_INTELLIGENCE_GROUPS, PRICING_INTELLIGENCE_CATEGORIES } from "../../schemas/pricing-intelligence";
 import { analyzePricingMargin } from "../../tools/pricing-margin-tool";
 import { analyzePricingDiscount } from "../../tools/pricing-discount-tool";
@@ -9,7 +9,7 @@ import { estimatePricingImpact } from "../../tools/pricing-impact-tool";
 import { assignPricingRecommendationGroup } from "../../tools/pricing-group-tool";
 import { arePricingRecommendationsSimilar } from "../../tools/pricing-similarity-tool";
 import { buildPricingIntelligenceEvidenceCatalog } from "../../agents/pricing-intelligence-evidence";
-import { buildPricingIntelligenceFactsFromSnapshot } from "./helpers";
+
 
 describe("Pricing intelligence tool matrix", () => {
   for (const category of PRICING_INTELLIGENCE_CATEGORIES) {

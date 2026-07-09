@@ -107,7 +107,7 @@ export function BillingDashboard({ dashboard }: BillingDashboardProps) {
       <s-section heading="Upgrade Recommendations">
         <s-stack gap="small-200">
           {dashboard.upgradeRecommendations.length === 0 ? (
-            <s-text color="subdued">You're on the highest plan for your store size.</s-text>
+            <s-text color="subdued">You&apos;re on the highest plan for your store size.</s-text>
           ) : (
             dashboard.upgradeRecommendations.map((item) => (
               <s-text key={item} color="subdued">

@@ -6,7 +6,7 @@ import {
   type ShopifyAdminContext,
 } from "./shopify-admin-client";
 import { appendShopifyAuditRecord } from "./shopify-audit";
-import { validateAutomationDryRun } from "./shopify-dry-run";
+import { validateAutomationDryRun , resolveShopifyCollectionId, resolveShopifyProductId } from "./shopify-dry-run";
 import {
   beginIdempotency,
   buildIdempotencyKey,
@@ -19,7 +19,6 @@ import { parseAutomationMutationPayload } from "./shopify-mutation-types";
 import { buildRollbackMetadata } from "./shopify-rollback";
 import { ShopifyExecutionError } from "./shopify-errors";
 import { assertMutationVerified } from "./shopify-verification";
-import { resolveShopifyCollectionId, resolveShopifyProductId } from "./shopify-dry-run";
 
 export type ShopifyExecutorDependencies = {
   resolveAdminContext?: (storeId: string) => Promise<ShopifyAdminContext>;

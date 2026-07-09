@@ -40,7 +40,7 @@ export type {
 } from "./executive-dashboard.types";
 import { getStoreSyncStatus } from "./sync-status.server";
 import { formatCurrency } from "./metrics.server";
-import { formatDurationMs, formatRelativeTime } from "../lib/format";
+import { formatDurationMs } from "../lib/format";
 import { getOrComputeCached, TimedCache } from "../lib/timed-cache.server";
 
 import type {

@@ -64,12 +64,6 @@ describe("billing single source of truth", () => {
   });
 
   it("does not hardcode plan prices outside plan-config.ts", () => {
-    const allowedPriceLiterals = new Set(
-      Object.values(BILLING_CONFIG.plans).map((plan) => String(plan.price)),
-    );
-    const forbiddenPatterns = ["29", "79", "199", "399"].filter(
-      (price) => !allowedPriceLiterals.has(price),
-    );
     const scanRoots = [billingRoot, join(appRoot, "components", "billing"), join(appRoot, "routes")];
     const offenders: string[] = [];
 

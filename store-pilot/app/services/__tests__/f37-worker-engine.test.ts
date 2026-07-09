@@ -287,11 +287,11 @@ describe("F.3.7 Worker Execution Engine", () => {
     expect(harness.getOnboarding(STORE_ID)?.productSyncJobId).toBeNull();
   });
 
-  it("6. fails unknown job types", async () => {
+  it("6. completes founder maintenance jobs", async () => {
     const harness = testHarness();
     const job = harness.seedSyncJob({
       jobType: "founder_maintenance",
-      idempotencyKey: "worker-unknown-job",
+      idempotencyKey: "worker-founder-maintenance",
       status: "queued",
       maxAttempts: 1,
       priority: "normal",
@@ -299,9 +299,9 @@ describe("F.3.7 Worker Execution Engine", () => {
 
     const result = await runNextJob("worker-1");
 
-    expect(result?.status).toBe("dead_letter");
+    expect(result?.status).toBe("completed");
     expect(result?.jobType).toBe("founder_maintenance");
-    expect(harness.dbState.syncJobs.get(job.id)?.status).toBe("dead_letter");
+    expect(harness.dbState.syncJobs.get(job.id)?.status).toBe("completed");
   });
 
   it("7. returns null when queue is empty", async () => {

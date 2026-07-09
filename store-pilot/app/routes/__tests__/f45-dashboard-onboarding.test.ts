@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loader } from "../app._index";
-import prisma from "../../db.server";
 import { getOnboardingStatus } from "../../services/onboarding-ui.server";
 import { authenticate } from "../../shopify.server";
 

@@ -22,18 +22,6 @@ export type SerializedStoreSyncStatus = {
   orders: OrdersSyncDomainStatus;
 };
 
-function isPhaseSynced(
-  phaseStatus: OnboardingPhaseStatus | null | undefined,
-  lastSyncAt: string | null,
-  count: number,
-): boolean {
-  if (phaseStatus === "completed" || phaseStatus === "skipped") {
-    return true;
-  }
-
-  return Boolean(lastSyncAt) && count > 0;
-}
-
 function isPhaseSyncing(
   phaseStatus: OnboardingPhaseStatus | null | undefined,
 ): boolean {

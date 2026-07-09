@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 
 import { ExecutiveChart } from "../../components/executive/ExecutiveChart";
 import { loader } from "../app.executive";
@@ -137,7 +137,7 @@ describe("Executive dashboard route loader", () => {
 
 describe("Executive dashboard components", () => {
   it("renders chart loading state and interactive summary", () => {
-    render(
+    const html = renderToString(
       <ExecutiveChart
         title="Revenue trend"
         points={[
@@ -148,8 +148,8 @@ describe("Executive dashboard components", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Revenue trend chart")).toBeTruthy();
-    expect(screen.getByText("Revenue trend")).toBeTruthy();
-    expect(screen.getByText("2 data points")).toBeTruthy();
+    expect(html).toContain("Revenue trend chart");
+    expect(html).toContain("Revenue trend");
+    expect(html).toContain("2 data points");
   });
 });

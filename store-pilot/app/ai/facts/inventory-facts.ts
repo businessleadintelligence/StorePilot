@@ -29,9 +29,6 @@ import {
 } from "../tools/stock-coverage-tool";
 import { buildXyzAnalysis } from "../tools/xyz-analysis-tool";
 import {
-  estimateInventoryRecommendationImpact,
-} from "../tools/inventory-impact-tool";
-import {
   calculateDaysOfInventoryRemaining,
   calculateInventoryTurnover,
   calculateInventoryVelocity,

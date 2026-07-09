@@ -10,13 +10,15 @@ describe("Trend Intelligence recommendation extraction", () => {
   it("filters implemented recommendations from extraction", () => {
     const facts = buildTrendFactsFromSnapshot();
     const output = buildValidTrendIntelligenceDraft(facts);
+    const implemented = output.recommendations[0];
+    expect(implemented).toBeDefined();
 
     runWithTrendIntelligenceContext(
       {
         storeId: "store-1",
         subjectKey: "trend:store-1",
         recommendationMemory: {
-          implementedIds: new Set(["trend:restock-blue-hoodie"]),
+          implementedIds: new Set([implemented!.id]),
           dismissedIds: new Set(),
           openIds: new Set(),
           snoozedIds: new Set(),
@@ -25,7 +27,7 @@ describe("Trend Intelligence recommendation extraction", () => {
       },
       () => {
         const extracted = extractTrendIntelligenceRecommendations(output);
-        expect(extracted.some((item) => item.title.includes("Blue Hoodie"))).toBe(false);
+        expect(extracted.some((item) => item.title === implemented!.title)).toBe(false);
       },
     );
   });
@@ -33,6 +35,10 @@ describe("Trend Intelligence recommendation extraction", () => {
   it("deprioritizes dismissed recommendations", () => {
     const facts = buildTrendFactsFromSnapshot();
     const output = buildValidTrendIntelligenceDraft(facts);
+    const dismissedRecommendation =
+      output.recommendations.find((recommendation) => recommendation.category === "Declining Demand") ??
+      output.recommendations[0];
+    expect(dismissedRecommendation).toBeDefined();
 
     runWithTrendIntelligenceContext(
       {
@@ -40,7 +46,7 @@ describe("Trend Intelligence recommendation extraction", () => {
         subjectKey: "trend:store-1",
         recommendationMemory: {
           implementedIds: new Set(),
-          dismissedIds: new Set(["trend:discount-beanie"]),
+          dismissedIds: new Set([dismissedRecommendation!.id]),
           openIds: new Set(),
           snoozedIds: new Set(),
           ignoredIds: new Set(),
@@ -48,7 +54,7 @@ describe("Trend Intelligence recommendation extraction", () => {
       },
       () => {
         const extracted = extractTrendIntelligenceRecommendations(output);
-        const dismissed = extracted.find((item) => item.title.includes("Beanie"));
+        const dismissed = extracted.find((item) => item.title === dismissedRecommendation!.title);
         expect(dismissed?.priority).toBeGreaterThan(2);
       },
     );

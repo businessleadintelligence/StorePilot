@@ -11,12 +11,9 @@ import {
   buildOrderNode,
   mockInventoryGraphqlResponse,
   mockOrdersSyncPageResponse,
-  mockProductByIdResponse,
-  mockProductsSyncGraphqlResponse,
   testHarness,
 } from "./helpers/fixtures";
 import { handleInventoryLevelUpdateWebhook } from "../inventory.server";
-import { failJobWithClient } from "../job.server";
 import {
   normalizeOrderRow,
   syncOrdersFromShopify,
@@ -410,7 +407,7 @@ describe("F.6.4 FIX-C2", () => {
 
     let findCalls = 0;
     vi.spyOn(harness.prismaMock.product, "findUnique").mockImplementation(
-      async (args) => {
+      async (_args) => {
         findCalls += 1;
         if (findCalls === 1) {
           return null;

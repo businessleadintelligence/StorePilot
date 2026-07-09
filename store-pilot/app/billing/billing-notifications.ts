@@ -1,6 +1,5 @@
-import type { BillingLimitCheckResult, BillingNotification, BillingTrialStatus } from "./billing-types";
+import type { BillingLimitCheckResult, BillingNotification, BillingTrialStatus , BillingPlanDefinition } from "./billing-types";
 import { resolveUpgradeTarget } from "./billing-limits";
-import type { BillingPlanDefinition } from "./billing-types";
 
 export function buildBillingNotifications(input: {
   trial: BillingTrialStatus;

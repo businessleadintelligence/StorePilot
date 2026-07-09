@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildStoreAuditDeliverableFields } from "../../schemas/store-audit";
-import { enrichStoreAuditOutput } from "../../agents/store-audit-enrichment";
+import { enrichStoreAuditOutput , mutateAndEnrichStoreAuditOutput } from "../../agents/store-audit-enrichment";
 import { buildStoreAuditFactsFromSnapshot, buildValidStoreAuditDraft } from "./helpers";
-import { mutateAndEnrichStoreAuditOutput } from "../../agents/store-audit-enrichment";
 
 describe("Store audit deliverable schema fields", () => {
   it("builds quick wins and critical issues from recommendations", () => {

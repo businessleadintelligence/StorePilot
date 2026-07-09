@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildPricingIntelligenceDeliverableFields } from "../../schemas/pricing-intelligence";
-import { enrichPricingIntelligenceOutput } from "../../agents/pricing-intelligence-enrichment";
+import { enrichPricingIntelligenceOutput , mutateAndEnrichPricingIntelligenceOutput } from "../../agents/pricing-intelligence-enrichment";
 import { buildPricingIntelligenceFactsFromSnapshot, buildValidPricingIntelligenceDraft } from "./helpers";
-import { mutateAndEnrichPricingIntelligenceOutput } from "../../agents/pricing-intelligence-enrichment";
+
 
 describe("Pricing intelligence deliverable schema fields", () => {
   it("builds quick wins and critical risks from recommendations", () => {

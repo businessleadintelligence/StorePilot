@@ -1,7 +1,7 @@
 import { buildRecommendationStableId } from "../cache/fingerprint";
 import type { RecommendationCandidate } from "../validation/recommendation-validator";
 import type { RecommendationRepository } from "../persistence/types";
-import type { RecommendationEngine, RecommendationStatus } from "./types";
+import type { RecommendationEngine } from "./types";
 
 export function createRecommendationEngineFromRepository(
   repository: RecommendationRepository,
@@ -83,5 +83,3 @@ export function mapCandidatesToRecommendations(input: {
     payloadJson: candidate.payload ?? {},
   }));
 }
-
-export type { RecommendationStatus };

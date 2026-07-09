@@ -4,7 +4,7 @@ import { getConnectorStatus } from "../connectors/core/connector.registry";
 import { getGoogleIntegrationPublicView } from "../services/google-integration.server";
 import { getClarityIntegrationPublicView } from "../services/clarity-integration.server";
 import { getStoreSyncStatus } from "../services/sync-status.server";
-import { buildSubsystemHealth, levelFromFailureCount, levelFromSyncTimestamp } from "./production-checks";
+import { buildSubsystemHealth, levelFromSyncTimestamp } from "./production-checks";
 import type { ProductionSubsystemHealth } from "./production-types";
 
 export async function monitorConnectorSubsystems(storeId: string): Promise<ProductionSubsystemHealth[]> {

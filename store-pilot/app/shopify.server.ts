@@ -62,7 +62,7 @@ function logAfterAuth(
   console.info(LOG_PREFIX, payload);
 }
 
-let shopifyAppInstance: ReturnType<typeof shopifyApp>;
+let shopifyAppInstance: ReturnType<typeof shopifyApp>; // eslint-disable-line prefer-const -- assigned after config for afterAuth hook
 
 const shopifyAppConfig = {
   apiKey: process.env.SHOPIFY_API_KEY,

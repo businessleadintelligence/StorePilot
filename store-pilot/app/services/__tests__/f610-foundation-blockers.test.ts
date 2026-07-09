@@ -32,7 +32,6 @@ import {
   buildWebhookCatchResponse,
   isRetriableWebhookError,
 } from "../webhook.server";
-import * as webhookServer from "../webhook.server";
 
 beforeEach(() => {
   const harness = testHarness();

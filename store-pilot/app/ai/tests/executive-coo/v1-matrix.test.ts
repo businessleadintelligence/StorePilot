@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExecutiveCooDeliverableFields } from "../../schemas/executive-coo";
-import { EXECUTIVE_COO_FOCUS_AREAS, EXECUTIVE_COO_GROUPS } from "../../schemas/executive-coo";
+import { buildExecutiveCooDeliverableFields , EXECUTIVE_COO_FOCUS_AREAS, EXECUTIVE_COO_GROUPS } from "../../schemas/executive-coo";
 import { rankExecutiveCooTopPriorities } from "../../agents/executive-coo-ranking";
 import { estimateExecutiveCooPriorityImpact } from "../../agents/executive-coo-impact";
 import { assignExecutiveCooGroupFromImpact } from "../../agents/executive-coo-groups";

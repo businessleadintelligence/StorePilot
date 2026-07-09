@@ -15,7 +15,7 @@ import {
   type AutomationPersistence,
 } from "./automation-persistence";
 import { getAutomationTemplate, inferAutomationTemplateId } from "./automation-templates";
-import { buildAutomationPreview } from "./automation-preview";
+import { buildAutomationPreview , serializePreviewForMerchant } from "./automation-preview";
 import { assessAutomationRisk, buildRollbackPlan } from "./automation-risk";
 import {
   validateCreateAutomationInput,
@@ -32,7 +32,6 @@ import {
   calculateAutomationMetrics,
   suggestTemplateFromLearning,
 } from "./automation-metrics";
-import { serializePreviewForMerchant } from "./automation-preview";
 
 export function buildAutomationNotification(input: {
   automation: StoreAutomation;
@@ -170,7 +169,7 @@ export async function createAutomationRecordForStore(input: {
     payload: input.createInput.payload,
   });
 
-  let automation = createAutomationRecord({
+  const automation = createAutomationRecord({
     createInput: input.createInput,
     templateId,
     preview,

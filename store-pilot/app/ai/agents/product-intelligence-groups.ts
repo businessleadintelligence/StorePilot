@@ -2,8 +2,8 @@ import type { ProductFacts } from "../facts/product-facts";
 import type {
   ProductIntelligenceGroup,
   ProductIntelligenceRecommendationDraft,
-} from "../schemas/product-intelligence";
-import type { EstimatedImpact } from "../schemas/product-intelligence";
+ EstimatedImpact } from "../schemas/product-intelligence";
+
 import { hasDeterministicImpact } from "./product-intelligence-impact";
 
 export function assignRecommendationGroup(input: {

@@ -1,12 +1,11 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { z } from "zod";
 
 import { AIPlatformError } from "../core/ai-errors";
 import { ConsoleAILogger } from "../core/ai-logger";
 import { loadAIConfig } from "../core/ai-config";
 import { AIRunner } from "../core/ai-runner";
-import type { AIStructuredRequest, AIStructuredResponse } from "../core/ai-types";
+import type { AIStructuredRequest } from "../core/ai-types";
 import { createFilePromptLoader } from "../prompts/file-prompt-loader";
 import { productRecommendationSchema } from "../schemas";
 import { createMockAIProvider } from "./helpers/mock-provider";

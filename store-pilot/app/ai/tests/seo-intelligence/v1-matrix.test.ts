@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SEO_INTELLIGENCE_CATEGORIES } from "../../schemas/seo-intelligence";
+import { SEO_INTELLIGENCE_CATEGORIES , buildSeoIntelligenceDeliverableFields } from "../../schemas/seo-intelligence";
 import { analyzeSeoContent } from "../../tools/seo-content-tool";
 import { analyzeTechnicalSeo } from "../../tools/seo-technical-tool";
 import { analyzeSeoIndexability } from "../../tools/seo-indexability-tool";
@@ -9,13 +9,9 @@ import { analyzeSeoCoreWebVitals } from "../../tools/seo-core-web-vitals-tool";
 import { analyzeSeoPerformance } from "../../tools/seo-performance-tool";
 import { analyzeSeoImageOptimization } from "../../tools/seo-image-optimization-tool";
 import { analyzeSeoAccessibility } from "../../tools/seo-accessibility-tool";
-import { analyzeSeoDuplicateContent } from "../../tools/seo-duplicate-content-tool";
-import { analyzeSeoCanonicalHealth } from "../../tools/seo-canonical-tool";
-import { analyzeSeoHeadingStructure } from "../../tools/seo-heading-structure-tool";
 import { analyzeSeoSearchVisibility } from "../../tools/seo-search-visibility-tool";
 import { analyzeSeoOrganicOpportunity } from "../../tools/seo-organic-opportunity-tool";
 import { calculateSeoIntelligenceHealthScore } from "../../tools/seo-health-tool";
-import { buildSeoIntelligenceDeliverableFields } from "../../schemas/seo-intelligence";
 
 const SEO_AREA_RUNNERS: Record<string, () => { score: number; issues: string[] }> = {
   "Technical SEO": () =>

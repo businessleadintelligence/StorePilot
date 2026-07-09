@@ -43,9 +43,6 @@ export function createPrismaTrendFactsSource(): TrendFactsSource {
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
       const variantIds = products.map((product) => product.shopifyVariantId);
-      const variantToProductId = new Map(
-        products.map((product) => [product.shopifyVariantId, product.id]),
-      );
 
       const [lineItems, storeOrders, recommendations] = await Promise.all([
         prisma.orderLineItem.findMany({

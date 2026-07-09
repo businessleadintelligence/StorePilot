@@ -25,7 +25,6 @@ import { analyzeSeoOrganicOpportunity } from "../tools/seo-organic-opportunity-t
 import { analyzeSeoPerformance } from "../tools/seo-performance-tool";
 import { analyzeSeoSearchVisibility } from "../tools/seo-search-visibility-tool";
 import {
-  calculateSeoHealthScore,
   calculateSeoIntelligenceScores,
   type SeoIntelligenceScores,
 } from "../tools/seo-intelligence-scores-tool";

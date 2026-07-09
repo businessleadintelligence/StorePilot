@@ -74,6 +74,11 @@ ALTER TABLE "subscriptions" ADD CONSTRAINT "subscriptions_planId_fkey" FOREIGN K
 -- AddForeignKey
 ALTER TABLE "usage_records" ADD CONSTRAINT "usage_records_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
+-- F.6.14 (moved from 20260620120000_f614_high_elimination): subscription lifecycle audit
+ALTER TABLE "subscriptions" ADD COLUMN "endedAt" TIMESTAMPTZ;
+
+CREATE INDEX "subscriptions_ended_at_idx" ON "subscriptions"("endedAt");
+
 -- Seed default plans
 INSERT INTO "plans" (
     "name",

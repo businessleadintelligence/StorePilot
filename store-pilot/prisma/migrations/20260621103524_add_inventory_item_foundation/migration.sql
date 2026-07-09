@@ -26,3 +26,9 @@ CREATE INDEX "products_inventory_item_idx" ON "products"("storeId", "shopifyInve
 
 -- AddForeignKey
 ALTER TABLE "webhook_events" ADD CONSTRAINT "webhook_events_storeId_fkey" FOREIGN KEY ("storeId") REFERENCES "stores"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- F.6.14 (moved from 20260620120000_f614_high_elimination): webhook single-flight processing
+ALTER TABLE "webhook_events" ADD COLUMN "processingOwner" VARCHAR(100);
+ALTER TABLE "webhook_events" ADD COLUMN "processingExpiresAt" TIMESTAMPTZ;
+ALTER TABLE "webhook_events" ALTER COLUMN "processedAt" DROP NOT NULL;
+ALTER TABLE "webhook_events" ALTER COLUMN "processedAt" DROP DEFAULT;

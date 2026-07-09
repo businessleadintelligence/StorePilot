@@ -1,6 +1,6 @@
 import { buildRecoveryActions, generateProductionAlerts } from "./production-alerts";
 import { buildDataQualitySubsystem, summarizeProductionHealth } from "./production-health";
-import { appendProductionHistory } from "./production-history";
+import { appendProductionHistory, clearProductionHistory } from "./production-history";
 import { computeProductionDataQuality } from "./production-data-quality";
 import { monitorAutomationHealth, monitorOperationsHealth } from "./production-metrics";
 import {
@@ -19,7 +19,7 @@ import {
   monitorShopifySubsystem,
 } from "./production-sync-monitor";
 import { monitorWebhooks } from "./production-webhook-monitor";
-import { upsertProductionNotifications } from "./production-notifications";
+import { upsertProductionNotifications, clearProductionNotifications } from "./production-notifications";
 import { buildSyncTimeline } from "./production-dashboard";
 import type { ProductionHealthSnapshot } from "./production-types";
 
@@ -98,8 +98,6 @@ export async function runProductionHealthEngine(storeId: string): Promise<Produc
 }
 
 export function clearProductionEngineState(storeId?: string): void {
-  const { clearProductionHistory } = require("./production-history") as typeof import("./production-history");
-  const { clearProductionNotifications } = require("./production-notifications") as typeof import("./production-notifications");
   clearProductionHistory(storeId);
   clearProductionNotifications(storeId);
 }

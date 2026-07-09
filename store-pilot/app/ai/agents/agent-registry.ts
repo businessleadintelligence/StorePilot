@@ -1,5 +1,3 @@
-import type { z } from "zod";
-
 import { buildFactFingerprint } from "../cache/fingerprint";
 import { genericPromptBuilder } from "../builders/prompt-builder";
 import { productRecommendationSchema, type ProductRecommendationOutput } from "../schemas";

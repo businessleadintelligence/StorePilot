@@ -14,8 +14,7 @@ import { assignTrendRecommendationGroup } from "../../tools/trend-group-tool";
 import { dedupeSimilarTrendRecommendations } from "../../tools/trend-similarity-tool";
 import { estimateTrendImpact } from "../../tools/trend-impact-tool";
 import { calculateTrendHealthScore } from "../../tools/trend-health-tool";
-import { validateTrendEvidenceKeys } from "../../agents/trend-intelligence-evidence";
-import { buildTrendEvidenceCatalog } from "../../agents/trend-intelligence-evidence";
+import { validateTrendEvidenceKeys , buildTrendEvidenceCatalog } from "../../agents/trend-intelligence-evidence";
 import { buildTrendFactsFromSnapshot } from "./helpers";
 
 describe("Trend intelligence deterministic coverage", () => {

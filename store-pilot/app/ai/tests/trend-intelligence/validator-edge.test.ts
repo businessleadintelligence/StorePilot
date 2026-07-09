@@ -19,6 +19,22 @@ describe("Trend Intelligence validator edge cases", () => {
     const facts = buildTrendFactsFromSnapshot();
     facts.emergingProductIds = [];
     const output = buildValidTrendIntelligenceDraft(facts);
+    output.recommendations.push({
+      id: "trend:invalid-emerging",
+      category: "Emerging Opportunity",
+      title: "Restock a product with no emerging signal",
+      reason: "This recommendation contradicts the empty emerging product set.",
+      evidenceKeys: ["emerging_product_count"],
+      merchantAction: ["Do not execute this invalid recommendation"],
+      expectedResult: "Should fail validation",
+      estimatedImpact: "None",
+      difficulty: "Easy",
+      priority: 2,
+      confidence: 0.5,
+      verificationCriteria: "Validation rejects contradictory trend output",
+      timeline: "1 week",
+      productId: "product-missing",
+    });
     expect(() => validateTrendIntelligenceBusinessRules(facts, output)).toThrow(AIPlatformError);
   });
 

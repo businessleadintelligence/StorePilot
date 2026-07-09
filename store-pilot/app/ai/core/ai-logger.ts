@@ -1,3 +1,4 @@
+import { createLogger, generateAiRequestId } from "../../lib/logging/index.server";
 import type { AIExecutionLogEntry, AIExecutionStatus, AIValidationStatus } from "./ai-types";
 
 export type AILogger = {
@@ -5,18 +6,16 @@ export type AILogger = {
 };
 
 export class ConsoleAILogger implements AILogger {
+  private readonly logger = createLogger({ component: "ai-platform" });
+
   logExecution(entry: AIExecutionLogEntry): void {
-    const payload = {
+    const level = entry.status === "failure" ? "error" : "info";
+
+    this.logger[level]("AI execution completed", {
       channel: "ai-platform",
+      aiRequestId: generateAiRequestId(),
       ...entry,
-    };
-
-    if (entry.status === "failure") {
-      console.error("[ai-platform]", payload);
-      return;
-    }
-
-    console.info("[ai-platform]", payload);
+    });
   }
 }
 

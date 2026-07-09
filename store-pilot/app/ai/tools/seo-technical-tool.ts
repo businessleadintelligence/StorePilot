@@ -1,5 +1,3 @@
-import type { SeoEstimatedImpact } from "../schemas/seo-intelligence";
-
 export function analyzeTechnicalSeo(input: {
   duplicateTitles: number;
   canonicalIssues: number;

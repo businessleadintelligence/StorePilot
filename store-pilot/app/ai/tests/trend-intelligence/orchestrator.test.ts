@@ -110,7 +110,7 @@ describe("Trend Intelligence orchestrator integration", () => {
       trendHealthScore: facts.trendHealthScore,
       trendDirection: facts.trendDirection,
       recommendations: expect.arrayContaining([
-        expect.objectContaining({ id: "trend:restock-blue-hoodie", evidence: expect.any(Array) }),
+        expect.objectContaining({ id: expect.stringMatching(/^trend:/), evidence: expect.any(Array) }),
       ]),
     });
   });

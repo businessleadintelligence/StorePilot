@@ -14,7 +14,6 @@ import {
 import {
   createTrialSubscription,
   getCurrentUsageMonth,
-  recordUsage,
 } from "../billing.server";
 
 const STARTER_AI_LIMIT = BILLING_CONFIG.limits.starter.aiExecutions;

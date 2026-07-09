@@ -5,7 +5,6 @@ import type {
 } from "./automation-types";
 
 export function calculateAutomationMetrics(automations: StoreAutomation[]): AutomationMetrics {
-  const total = automations.length;
   const prepared = automations.filter((automation) =>
     ["prepared", "waiting_approval", "approved", "executing", "executed", "verifying", "verified"].includes(
       automation.status,

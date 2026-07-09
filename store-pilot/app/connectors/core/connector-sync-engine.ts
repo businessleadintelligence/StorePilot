@@ -126,4 +126,4 @@ export function invalidateStoreConnectorCache(storeId: string): void {
   clearConnectorCache(storeId);
 }
 
-export { DEFAULT_CACHE_TTL_MS, DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_DELAY_MS };
+export { DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_DELAY_MS };

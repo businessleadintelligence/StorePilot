@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { computeOnboardingProgress, getNextOnboardingStepId, isOnboardingStepSkippable } from "../onboarding-progress";
 import { buildMerchantOnboardingRecord } from "./helpers";

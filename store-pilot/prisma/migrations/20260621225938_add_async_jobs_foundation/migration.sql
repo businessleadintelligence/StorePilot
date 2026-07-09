@@ -167,3 +167,10 @@ ALTER TABLE "job_events" ADD CONSTRAINT "job_events_storeId_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "job_events" ADD CONSTRAINT "job_events_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "sync_jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- F.6.18 (moved from 20260620190000_f618_high_elimination)
+ALTER TABLE "sync_jobs"
+ADD COLUMN "workerGeneration" INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE "store_onboarding"
+ADD COLUMN "ownershipRepairPending" BOOLEAN NOT NULL DEFAULT false;

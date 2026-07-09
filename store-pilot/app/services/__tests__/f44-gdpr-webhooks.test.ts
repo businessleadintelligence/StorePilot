@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import prisma from "../../db.server";
 import { hashIdentifierForLog } from "../../lib/privacy-by-architecture";
 import { SHOP, STORE_ID, testHarness } from "./helpers/fixtures";
 import {
@@ -206,6 +207,66 @@ describe("F.4.4 GDPR Webhook Service Handlers", () => {
       "[gdpr-webhook]",
       expect.objectContaining({ operation: "shop_redacted", storeId: STORE_ID }),
     );
+  });
+
+  it("3b. deletes integrations and AI data on shop redact", async () => {
+    const harness = testHarness();
+    harness.dbState.googleIntegrations.set(STORE_ID, {
+      id: "google-1",
+      storeId: STORE_ID,
+      googleAccountId: "ga-1",
+      email: "merchant@store.com",
+      refreshToken: "encrypted-refresh",
+      accessToken: "encrypted-access",
+      expiresAt: new Date(Date.now() + 3600_000),
+      connectedAt: new Date(),
+      lastSyncAt: null,
+      analyticsPropertyId: null,
+      analyticsPropertyName: null,
+      searchConsoleSiteUrl: null,
+      searchConsoleSiteName: null,
+      searchConsoleLastSyncAt: null,
+      pageSpeedLastSyncAt: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    harness.dbState.microsoftClarityIntegrations.set(STORE_ID, {
+      id: "clarity-1",
+      storeId: STORE_ID,
+      projectId: "clarity-project",
+      projectName: "Store",
+      apiToken: "encrypted-token",
+      connectedAt: new Date(),
+      lastSyncAt: null,
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const result = await handleShopRedactWebhook({
+      shop: SHOP,
+      topic: "shop/redact",
+      webhookId: "wh-gdpr-shop-integrations",
+      payload: buildShopRedactPayload(),
+    });
+
+    expect(result.action).toBe("shop_redacted");
+    expect(harness.dbState.stores).toHaveLength(0);
+    expect(harness.dbState.googleIntegrations.size).toBe(0);
+    expect(harness.dbState.microsoftClarityIntegrations.size).toBe(0);
+    expect(prisma.aiRecommendation.deleteMany).toHaveBeenCalledWith({
+      where: { storeId: STORE_ID },
+    });
+    expect(prisma.aiAgentRun.deleteMany).toHaveBeenCalledWith({
+      where: { storeId: STORE_ID },
+    });
+    expect(prisma.googleIntegration.deleteMany).toHaveBeenCalledWith({
+      where: { storeId: STORE_ID },
+    });
+    expect(prisma.microsoftClarityIntegration.deleteMany).toHaveBeenCalledWith({
+      where: { storeId: STORE_ID },
+    });
   });
 
   it("4. rejects customer webhooks with missing payload fields", async () => {

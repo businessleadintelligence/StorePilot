@@ -1,7 +1,7 @@
 ﻿import { describe, expect, it } from "vitest";
 
 import { buildMockGrowthScores } from "./helpers";
-import { GROWTH_INTELLIGENCE_CATEGORIES } from "../../schemas/growth-intelligence";
+import { GROWTH_INTELLIGENCE_CATEGORIES , buildGrowthIntelligenceDeliverableFields } from "../../schemas/growth-intelligence";
 import { analyzeRevenueGrowth } from "../../tools/revenue-growth-tool";
 import { analyzeAovGrowth } from "../../tools/aov-growth-tool";
 import { analyzeUpsellOpportunity } from "../../tools/upsell-tool";
@@ -15,7 +15,7 @@ import { analyzeGrowthSeasonality } from "../../tools/growth-seasonality-tool";
 import { analyzeLandingPageGrowth } from "../../tools/landing-page-growth-tool";
 import { analyzeGrowthRisk } from "../../tools/growth-risk-tool";
 import { calculateGrowthIntelligenceHealthScore } from "../../tools/growth-health-tool";
-import { buildGrowthIntelligenceDeliverableFields } from "../../schemas/growth-intelligence";
+
 
 const GROWTH_AREA_RUNNERS: Record<string, () => { score?: number; growthRisk?: number; retentionScore?: number; issues: string[] }> = {
   "Revenue Growth": () =>

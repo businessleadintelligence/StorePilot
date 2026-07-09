@@ -1,9 +1,6 @@
 import { z } from "zod";
 
-import {
-  collaborationSchema,
-  type CollaborationOutputSchema,
-} from "./collaboration";
+import { collaborationSchema } from "./collaboration";
 
 import {
   productIntelligenceSchema,

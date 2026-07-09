@@ -4,14 +4,14 @@ import { AIPlatformError } from "../../core/ai-errors";
 import {
   buildExecutiveCooFactsFromSnapshot,
   buildValidExecutiveCooDraft,
-} from "./helpers";
+ createMockExecutiveCooSnapshot } from "./helpers";
 import {
   isVagueExecutiveCooPriorityText,
   validateExecutiveCooBusinessRules,
 } from "../../agents/executive-coo.validator";
 import { mutateAndEnrichExecutiveCooOutput } from "../../agents/executive-coo-enrichment";
 import { createExecutiveCooFactsBuilder } from "../../facts/executive-coo-facts";
-import { createMockExecutiveCooSnapshot } from "./helpers";
+
 
 describe("Executive COO validator", () => {
   it("rejects health score mismatch", async () => {

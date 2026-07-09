@@ -27,9 +27,12 @@ describe("AI logging", () => {
       }),
     );
 
-    const payload = JSON.stringify(infoSpy.mock.calls[0]?.[1]);
+    const line = infoSpy.mock.calls[0]?.[0];
+    expect(typeof line).toBe("string");
+    const payload = JSON.stringify(JSON.parse(String(line)));
     expect(payload).toContain("platform.template");
     expect(payload).not.toContain("customer@example.com");
     expect(payload).toContain("estimatedCostUsd");
+    expect(payload).toContain("aiRequestId");
   });
 });

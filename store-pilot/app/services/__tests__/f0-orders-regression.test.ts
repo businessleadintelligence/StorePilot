@@ -52,7 +52,10 @@ function normalizedOrderFromNode(
 
 function normalizedLineItemsFromOrder(order: OrderNode) {
   return (order.lineItems?.edges ?? [])
-    .map((edge) => normalizeOrderLineItemRow(order, edge?.node!))
+    .map((edge) => {
+      const node = edge?.node;
+      return node ? normalizeOrderLineItemRow(order, node) : null;
+    })
     .filter((row): row is NonNullable<typeof row> => row != null);
 }
 
@@ -149,7 +152,10 @@ describe("F.0.2 Orders Reliability Regression", () => {
 
     it("normalizes a valid line item row", () => {
       const order = asOrderNode(buildOrderNode());
-      const lineItem = order.lineItems?.edges?.[0]?.node!;
+      const lineItem = order.lineItems?.edges?.[0]?.node;
+      if (!lineItem) {
+        throw new Error("expected line item");
+      }
       const row = normalizeOrderLineItemRow(order, lineItem);
 
       expect(row).not.toBeNull();

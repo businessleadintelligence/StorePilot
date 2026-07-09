@@ -4,8 +4,6 @@ import type {
 } from "react-router";
 import { useLoaderData } from "react-router";
 
-import { GoogleAnalyticsSetupCard } from "../components/GoogleAnalyticsSetupCard";
-import { OnboardingReminderBanner } from "../components/onboarding/OnboardingReminderBanner";
 import { ExecutiveBriefCard } from "../components/ExecutiveBriefCard";
 import { HealthScoreCard } from "../components/HealthScoreCard";
 import { InsightsCard } from "../components/InsightsCard";
@@ -43,11 +41,6 @@ import {
   getStoreSyncStatus,
   serializeStoreSyncStatusForLoader,
 } from "../services/sync-status.server";
-import { getGoogleIntegrationPublicView } from "../services/google-integration.server";
-import {
-  getOnboardingReminders,
-  serializeMerchantOnboardingRemindersForLoader,
-} from "../onboarding/onboarding-service";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 

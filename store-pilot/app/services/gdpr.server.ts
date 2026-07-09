@@ -270,6 +270,14 @@ async function deleteShopDataByDomain(
   const storeId = existing.id;
 
   await prisma.$transaction(async (tx) => {
+    await tx.aiRecommendation.deleteMany({ where: { storeId } });
+    await tx.aiResultCacheEntry.deleteMany({ where: { storeId } });
+    await tx.aiAgentResult.deleteMany({ where: { storeId } });
+    await tx.aiAgentRun.deleteMany({ where: { storeId } });
+    await tx.aiMemoryRecord.deleteMany({ where: { storeId } });
+    await tx.googleIntegration.deleteMany({ where: { storeId } });
+    await tx.microsoftClarityIntegration.deleteMany({ where: { storeId } });
+    await tx.customerDataExport.deleteMany({ where: { storeId } });
     await tx.storeOnboarding.deleteMany({ where: { storeId } });
     await tx.jobEvent.deleteMany({ where: { storeId } });
     await tx.syncJob.deleteMany({ where: { storeId } });

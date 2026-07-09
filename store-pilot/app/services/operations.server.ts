@@ -1,4 +1,4 @@
-import type { OperationStatus, StoreOperation } from "../operations/operations-types";
+import type { OperationStatus, StoreOperation , CreateOperationInput } from "../operations/operations-types";
 import {
   createInMemoryOperationsPersistence,
   loadOperationsSnapshot,
@@ -23,7 +23,6 @@ import { refreshOperationProgress } from "../operations/operations-progress";
 import { appendOperationHistory } from "../operations/operations-history";
 import { notificationForStatusChange } from "../operations/operations-notifications";
 import { updateMerchantLearningProfile } from "../operations/operations-metrics";
-import type { CreateOperationInput } from "../operations/operations-types";
 
 export type {
   CreateOperationInput,

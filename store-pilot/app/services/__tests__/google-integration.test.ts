@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-import { SHOP, STORE_ID, testHarness } from "./helpers/fixtures";
+import { STORE_ID, testHarness } from "./helpers/fixtures";
 import {
   disconnectGoogleIntegration,
   getGoogleIntegrationPublicView,

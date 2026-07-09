@@ -9,7 +9,6 @@ import { detectCollaborationDependencies } from "../../collaboration/collaborati
 import { clusterRecommendationsForMerge } from "../../collaboration/collaboration-merge";
 import { CollaborationValidationError, validateCollaborationOutput } from "../../collaboration/collaboration-validator";
 import { buildCollaborationChartData } from "../../collaboration/collaboration-timeline";
-import type { CollaborationRecommendationInput } from "../../collaboration/collaboration-types";
 import { createMockCollaborationContext, createMockRecommendations } from "./helpers";
 
 describe("Collaboration merge and reinforcement", () => {

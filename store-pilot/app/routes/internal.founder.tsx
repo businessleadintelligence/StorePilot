@@ -26,4 +26,4 @@ export default function FounderOperationsRoute() {
   const { snapshot } = useLoaderData<typeof loader>();
 
   return <FounderOperationsDashboard snapshot={snapshot} />;
-};
+}

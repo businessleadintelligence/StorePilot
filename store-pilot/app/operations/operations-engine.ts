@@ -1,5 +1,11 @@
 import type { CollaborationExecutiveAction } from "../ai/collaboration/collaboration-types";
-import type { CreateOperationInput, OperationsCenterData, StoreOperation } from "./operations-types";
+import {
+  KANBAN_COLUMNS,
+  type CreateOperationInput,
+  type KanbanColumn,
+  type OperationsCenterData,
+  type StoreOperation,
+} from "./operations-types";
 import {
   buildTasksFromTemplate,
   getWorkflowTemplate,
@@ -10,13 +16,14 @@ import {
   inferPriorityFromSource,
   rankOperationsQueue,
 } from "./operations-priority";
-import { scheduleOperationForMerchant } from "./operations-scheduler";
+import { scheduleOperationForMerchant , bucketOperationsByCalendar, findOverdueOperations } from "./operations-scheduler";
 import {
   validateCreateOperationInput,
   validateDuplicateOperation,
 } from "./operations-validator";
 import {
   createOperationRecord,
+  createInMemoryOperationsPersistence,
   loadOperationsSnapshot,
   saveOperationsSnapshot,
   upsertOperationInSnapshot,
@@ -29,8 +36,6 @@ import {
   buildOperationsCharts,
   calculateOperationsMetrics,
 } from "./operations-metrics";
-import { bucketOperationsByCalendar, findOverdueOperations } from "./operations-scheduler";
-import { KANBAN_COLUMNS, type KanbanColumn } from "./operations-types";
 
 export function buildOperationFromExecutiveAction(action: CollaborationExecutiveAction): CreateOperationInput {
   return {
@@ -194,9 +199,6 @@ export async function createOperationRecordForStore(input: {
   return operation;
 }
 
-function createInMemoryOperationsPersistence() {
-  return require("./operations-persistence").createInMemoryOperationsPersistence();
-}
 
 export async function syncOperationsFromExecutiveDecisions(input: {
   storeId: string;

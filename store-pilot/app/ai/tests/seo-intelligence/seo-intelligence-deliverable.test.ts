@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildSeoIntelligenceDeliverableFields } from "../../schemas/seo-intelligence";
-import { enrichSeoIntelligenceOutput } from "../../agents/seo-intelligence-enrichment";
+import { enrichSeoIntelligenceOutput , mutateAndEnrichSeoIntelligenceOutput } from "../../agents/seo-intelligence-enrichment";
 import { buildSeoIntelligenceFactsFromSnapshot, buildValidSeoIntelligenceDraft } from "./helpers";
-import { mutateAndEnrichSeoIntelligenceOutput } from "../../agents/seo-intelligence-enrichment";
+
 
 describe("SEO intelligence deliverable schema fields", () => {
   it("builds quick wins and critical issues from recommendations", () => {

@@ -5,8 +5,6 @@ import { calculateStoreHealthScore } from "../health-score.server";
 import {
   buildExecutiveConcerns,
   buildExecutiveHeadline,
-  buildExecutiveHighlights,
-  buildExecutiveSummary,
   calculateExecutiveBrief,
   getExecutiveBrief,
 } from "../executive-brief.server";
