@@ -55,22 +55,21 @@ api_version = "2025-10"
   uri = "/webhooks/orders/cancelled"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/data_request" ]
+  compliance_topics = [ "customers/data_request" ]
   uri = "/webhooks/customers/data_request"
 
   [[webhooks.subscriptions]]
-  topics = [ "customers/redact" ]
+  compliance_topics = [ "customers/redact" ]
   uri = "/webhooks/customers/redact"
 
   [[webhooks.subscriptions]]
-  topics = [ "shop/redact" ]
+  compliance_topics = [ "shop/redact" ]
   uri = "/webhooks/shop/redact"
 
 [auth]
 redirect_urls = [
   "https://store-pilot-eta.vercel.app/auth/callback",
-  "https://store-pilot-eta.vercel.app/api/auth/callback"
-]
+  ]
 
 [build]
 automatically_update_urls_on_dev = true

@@ -26,6 +26,8 @@ function parseEnv(content) {
 const env = parseEnv(readFileSync(envPath, "utf8"));
 
 const targets = [
+  { key: "DATABASE_URL", environments: ["production", "preview", "development"] },
+  { key: "DIRECT_URL", environments: ["production", "preview", "development"] },
   { key: "SCOPES", environments: ["production", "preview", "development"] },
   { key: "TOKEN_ENCRYPTION_KEY", environments: ["production", "preview", "development"] },
   { key: "CRON_SECRET", environments: ["production", "preview", "development"] },
