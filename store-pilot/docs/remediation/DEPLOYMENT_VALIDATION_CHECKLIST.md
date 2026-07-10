@@ -16,7 +16,7 @@
 |-------|------|--------|
 | 1 | Git | 🔴 BLOCKED |
 | 2 | Vercel | 🔴 BLOCKED |
-| 3 | Railway | 🔴 BLOCKED |
+| 3 | Vercel Cron | 🟡 Verify post-deploy |
 | 4 | Database | 🟡 Partial |
 | 5 | Environment Variables | 🔴 BLOCKED |
 | 6 | Queue | 🔴 BLOCKED |
@@ -82,25 +82,28 @@ vercel --prod
 
 ---
 
-## Stage 3 — Railway
+## Stage 3 — Vercel Cron (replaces Railway worker)
 
 | # | Check | Status | Evidence |
 |---|-------|--------|----------|
-| 3.1 | Worker service deployed | 🔴 | No Railway worker verified |
-| 3.2 | Worker process started | 🔴 | — |
-| 3.3 | `activeWorkers >= 1` | 🔴 | `/health/worker` → **500** (pre-deploy) |
-| 3.4 | Heartbeat updating | 🔴 | `worker_instances` empty in prod DB (C.1 evidence) |
+| 3.1 | All 12 crons in `vercel.json` | 🟢 | RC3.5 — synced with `cron-scheduler.server.ts` |
+| 3.2 | `CRON_SECRET` set on Vercel production | 🟡 | Verify via `vercel env ls production` |
+| 3.3 | `/cron/worker` executes on schedule | 🟡 | Vercel Dashboard → Cron Logs after deploy |
+| 3.4 | `/health/worker` healthy with cron | 🟡 | Expect `executionMode: serverless_cron`, HTTP 200 |
 
 **Required:**
 
 ```bash
-railway login && railway link
-railway up --service worker -d
 curl https://store-pilot-eta.vercel.app/health/worker
-# Expect: status healthy, activeWorkers >= 1
+# Expect: ok true, executionMode serverless_cron, CRON_SECRET configured
+
+# Manual cron trigger (optional)
+curl -H "Authorization: Bearer $CRON_SECRET" https://store-pilot-eta.vercel.app/cron/worker
 ```
 
-See [RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md).
+See [WORKER_DEPLOYMENT.md](./WORKER_DEPLOYMENT.md).
+
+**Note:** Railway/Docker worker deployment is **not required**. `activeWorkers >= 1` is **not** a pass criterion under serverless architecture.
 
 ---
 

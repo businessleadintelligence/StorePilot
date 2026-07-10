@@ -1,14 +1,17 @@
 {
-  "$comment": "Full production cron schedule for Vercel Pro. Copy the crons array into vercel.json when upgrading from Hobby.",
+  "$comment": "Reference copy of the full production cron schedule. Kept in sync with vercel.json and cron-scheduler.server.ts.",
   "crons": [
     { "path": "/cron/worker", "schedule": "*/2 * * * *" },
     { "path": "/cron/dispatch/retry-queue", "schedule": "*/5 * * * *" },
     { "path": "/cron/dispatch/expired-sessions", "schedule": "0 * * * *" },
+    { "path": "/cron/dispatch/privacy-pii-scan", "schedule": "0 1 * * *" },
     { "path": "/cron/dispatch/cleanup-jobs", "schedule": "0 2 * * *" },
     { "path": "/cron/dispatch/knowledge-refresh", "schedule": "0 3 * * *" },
     { "path": "/cron/dispatch/learning-engine", "schedule": "0 4 * * *" },
+    { "path": "/cron/dispatch/token-migration", "schedule": "0 5 * * *" },
     { "path": "/cron/dispatch/daily-operating-plan", "schedule": "0 6 * * *" },
-    { "path": "/cron/dispatch/metrics-aggregation", "schedule": "0 */6 * * *" },
-    { "path": "/cron/dispatch/recommendation-refresh", "schedule": "0 7,19 * * *" }
+    { "path": "/cron/dispatch/recommendation-refresh", "schedule": "0 7,19 * * *" },
+    { "path": "/cron/dispatch/scope-drift-monitor", "schedule": "0 8 * * *" },
+    { "path": "/cron/dispatch/metrics-aggregation", "schedule": "0 */6 * * *" }
   ]
 }

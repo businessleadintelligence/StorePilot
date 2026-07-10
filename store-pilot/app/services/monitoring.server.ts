@@ -290,11 +290,12 @@ export async function checkWorkerHealth(
           ? infrastructure.alerts.join(", ")
           : "Worker infrastructure operational",
       details: {
+        executionMode: infrastructure.executionMode,
         queue: infrastructure.queue,
         queueExtended: infrastructure.queueExtended,
         workers: infrastructure.workers,
         orphanJobs: infrastructure.orphanJobs,
-        cronFallback: infrastructure.cronFallback,
+        cron: infrastructure.cron,
         alerts: infrastructure.alerts,
       },
     });

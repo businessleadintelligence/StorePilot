@@ -1,3 +1,4 @@
+# LEGACY — Not used in StorePilot production (RC3.5). Vercel Cron is the worker path.
 FROM node:20-alpine
 RUN apk add --no-cache openssl
 

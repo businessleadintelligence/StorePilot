@@ -1,59 +1,62 @@
 # Rollback Plan — StorePilot v1.0
 
-**Last updated:** 2026-07-10
+**Date:** 2026-07-10 (RC3.5 serverless alignment)  
+**Architecture:** Vercel-only
 
-## Application rollback (Vercel)
-
-```bash
-# List recent deployments
-vercel ls store-pilot --prod
-
-# Promote previous deployment
-vercel rollback <deployment-url> --prod
-```
-
-**Known good baseline:** deployment from commit `b1789a7` (current production as of 2026-07-10).
-
-## Worker rollback (Railway)
+## Vercel application rollback
 
 ```bash
-railway rollback --service worker
-# Or redeploy previous image from Railway dashboard → Deployments
+# Redeploy previous production deployment from Vercel dashboard
+# Deployments → select previous successful deployment → Promote to Production
 ```
+
+Or via CLI:
+
+```bash
+vercel rollback
+```
+
+**Recovery time:** < 5 minutes
 
 ## Database rollback
 
-**Strategy:** Forward-only migrations. No automatic down-migration in production.
+Prisma migrations are **forward-only**. Do not revert migrations in production unless a dedicated down migration was prepared.
 
-| Action | Command |
-|--------|---------|
-| Verify applied | `npx prisma migrate status` |
-| Emergency restore | Restore Supabase point-in-time backup (dashboard) |
+If a migration caused failure:
 
-**Before each release:**
+1. Redeploy previous application version (compatible with current schema)
+2. Fix migration in development
+3. Deploy corrected forward migration
 
-1. Confirm Supabase PITR backup window enabled
-2. Export schema: `npx prisma migrate diff`
-3. Record `_prisma_migrations` row count
+## Cron rollback
+
+If a cron schedule change causes issues:
+
+1. Revert `vercel.json` crons array to previous commit
+2. Redeploy Vercel
+3. Verify Cron Jobs tab shows restored schedules
 
 ## Environment rollback
 
 ```bash
-vercel env pull .env.production.backup
-# Restore prior values via Vercel dashboard → Environment Variables → history
+vercel env rm VARIABLE_NAME production
+vercel env add VARIABLE_NAME production  # restore previous value
+vercel --prod  # redeploy to pick up env changes
 ```
 
-## Rollback triggers
+## Verification after rollback
 
-- `/health/ready` 503 persists > 15 min after deploy
-- Fresh install bootstrap failure rate > 0
-- GDPR webhook failure
-- Data corruption in sync_jobs or store_onboarding
+```bash
+curl https://store-pilot-eta.vercel.app/health
+curl https://store-pilot-eta.vercel.app/health/worker
+curl https://store-pilot-eta.vercel.app/health/monitor
+```
 
-## Recovery time objective
+## Recovery time targets
 
 | Component | Target |
 |-----------|--------|
-| Vercel app | < 5 min (rollback promote) |
-| Railway worker | < 10 min |
-| Database | < 1 hr (PITR, last resort) |
+| Vercel app | < 5 min |
+| Environment vars | < 10 min |
+| Cron schedules | < 10 min (after redeploy) |
+| Database (forward fix) | Variable |

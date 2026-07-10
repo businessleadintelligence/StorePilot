@@ -1,56 +1,18 @@
-# Railway Deployment — Phase C.2
+# Railway Deployment — DEPRECATED
 
-## Quick Start
+**Date:** 2026-07-10  
+**Status:** ⛔ **NOT USED** — StorePilot runs entirely on Vercel
 
-```bash
-# From repo root
-railway login
-railway init          # or railway link to existing project
-railway service create worker
-railway variables set DATABASE_URL=... SHOPIFY_API_KEY=... # etc.
-railway up --service worker -d
-```
+---
 
-## Configuration Files
+This document is retained for historical reference only. StorePilot production architecture is:
 
-| File | Purpose |
-|------|---------|
-| `railway.toml` | Build + restart policy |
-| `Dockerfile.worker` | Production worker image |
+**GitHub → Vercel → Vercel Cron → Supabase → Shopify**
 
-## railway.toml
+See:
 
-```toml
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.worker"
+- [WORKER_DEPLOYMENT.md](./WORKER_DEPLOYMENT.md) — Vercel Cron worker verification
+- [DEPLOYMENT_PLAN.md](../release/DEPLOYMENT_PLAN.md) — production deployment sequence
+- [WORKER_ARCHITECTURE.md](../WORKER_ARCHITECTURE.md) — current architecture
 
-[deploy]
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-numReplicas = 1
-```
-
-## Health
-
-Worker process does not expose HTTP. Health is verified via **Vercel** endpoint that reads `worker_instances` table:
-
-```bash
-curl https://store-pilot-eta.vercel.app/health/worker
-```
-
-Worker registers heartbeat through `worker-registry.server.ts` on each cycle.
-
-## Autoscaling
-
-Railway: increase `numReplicas` or enable autoscaling in dashboard when queue depth sustains > N jobs.
-
-Recommended starting point: **1 replica**, scale to 2+ when `oldest_queued_job_minutes > 5` consistently.
-
-## Rollback
-
-```bash
-railway rollback --service worker
-```
-
-Vercel cron fallback (`*/2 * * * *`) continues processing if Railway worker down.
+Do not deploy `Dockerfile.worker` or `railway.toml` for StorePilot production.

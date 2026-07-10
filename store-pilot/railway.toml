@@ -1,3 +1,6 @@
+# LEGACY — Not used in StorePilot production (RC3.5)
+# StorePilot runs on Vercel Cron. See docs/WORKER_ARCHITECTURE.md
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.worker"

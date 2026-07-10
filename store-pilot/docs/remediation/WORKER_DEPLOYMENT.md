@@ -1,91 +1,105 @@
-# Worker Deployment — Phase C.2
+# Worker Deployment — Vercel Cron (Production)
 
-## Architecture
+**Date:** 2026-07-10 (RC3.5 serverless alignment)  
+**Supersedes:** Railway/Docker worker deployment instructions
 
-| Component | Role |
-|-----------|------|
-| **Railway worker** | Primary — continuous `npm run worker` |
-| **Vercel cron** | Fallback — `GET /cron/worker` every 2 min |
+---
 
-## Local / Docker
+## Production architecture
 
-```bash
-# Build
-npm run build
+StorePilot processes background jobs via **Vercel Cron** — no separate worker service.
 
-# Run worker (production)
-npm run worker
+```
+GitHub → Vercel → Vercel Cron (/cron/worker) → Supabase (sync_jobs) → Shopify API
 ```
 
-`Dockerfile.worker` — Node 20 Alpine, runs `npm run worker` after build.
+---
 
-## Railway Deployment
+## Configuration
 
-### 1. Create service
+### vercel.json
 
-```bash
-railway login
-railway link
-railway up --service worker
-```
+All production crons are defined in `vercel.json` (12 schedules). Must match `cron-scheduler.server.ts`.
 
-Uses `railway.toml`:
-
-```toml
-[build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.worker"
-
-[deploy]
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-numReplicas = 1
-```
-
-### 2. Required environment variables
-
-Copy from Vercel production:
-
-- `DATABASE_URL`, `DIRECT_URL`
-- `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SCOPES`, `SHOPIFY_APP_URL`
-- `TOKEN_ENCRYPTION_KEY`
-- `CRON_SECRET`
-- `OPENAI_API_KEY`, `AI_PROVIDER`, `AI_MODEL`
-- Optional tuning: `JOB_LOCK_DURATION_MS`, `WORKER_BATCH_SIZE`, `WORKER_HEARTBEAT_INTERVAL_MS`
-
-### 3. Verify
-
-```bash
-curl https://store-pilot-eta.vercel.app/health/worker
-```
-
-**Pass criteria:** `activeWorkers >= 1`, `status: healthy`
-
-## Worker Runtime Features (existing)
-
-- `claimNextJob` → `claimed` → `beginJobExecution` → `running`
-- Heartbeat + lock extension
-- Stale job release
-- `markPhaseStarted()` on onboarding jobs (C.2 addition)
-- Graceful shutdown via `worker-runtime.server.ts`
-
-## Cron Fallback
-
-`vercel.json` updated:
+Primary worker cron:
 
 ```json
 { "path": "/cron/worker", "schedule": "*/2 * * * *" }
 ```
 
-Authorized via `Authorization: Bearer $CRON_SECRET`.
+### Environment
 
-Unauthorized GET returns health-only (no job execution).
+| Variable | Required |
+|----------|----------|
+| `CRON_SECRET` | Yes — Vercel injects as Bearer token on cron invocations |
+| `CRON_JOB_BATCH_SIZE` | Optional (default 3, max 10) |
+| `DATABASE_URL` | Yes |
+| All Shopify vars | Yes |
 
-## Monitoring Alerts (`worker-health.server.ts`)
+---
 
-- `no_active_workers`
-- `stale_workers:N`
-- `dead_letter_jobs:N`
-- `cancelled_bootstrap_jobs:N` (new)
-- `cancelled_jobs:N` when queue depth > 0
-- `oldest_queued_job_minutes:N`
+## Verification
+
+### 1. Cron schedules active
+
+Vercel Dashboard → Project → Settings → Cron Jobs
+
+### 2. Cron execution logs
+
+Vercel Dashboard → Logs → filter `path:/cron/worker`
+
+Expected log sequence:
+- `[cron-worker] cron_worker_started`
+- `[worker] worker_cycle_completed`
+- `[cron-worker] cron_worker_completed`
+
+### 3. Worker health endpoint
+
+```bash
+curl -s https://YOUR_APP/health/worker | jq '{ok, status, executionMode, alerts}'
+```
+
+Pass: `ok: true`, `executionMode: "serverless_cron"`, `activeWorkers: 0` is acceptable.
+
+### 4. Queue monitoring
+
+```bash
+curl -s https://YOUR_APP/health/worker | jq '.queueExtended'
+```
+
+Monitor: `queueDepth`, `oldestQueuedJobAgeMs`, `throughputLastHour`, `averageExecutionTimeMs`
+
+---
+
+## Local development
+
+For faster iteration without waiting for cron ticks:
+
+```bash
+# Manual cron invocation (requires CRON_SECRET)
+curl -H "Authorization: Bearer $CRON_SECRET" https://localhost:PORT/cron/worker
+
+# Optional: continuous local worker (not production path)
+npm run worker
+```
+
+---
+
+## Pass criteria
+
+| Check | Expected |
+|-------|----------|
+| `/health/worker` | HTTP 200, `executionMode: serverless_cron` |
+| `/health/worker` alerts | No `no_worker_capacity` |
+| Cron logs | `cron_worker_completed` within 2 min of deploy |
+| `sync_jobs` | Jobs transition queued → completed after install |
+
+---
+
+## Legacy (not production)
+
+| Artifact | Status |
+|----------|--------|
+| `Dockerfile.worker` | Legacy — do not deploy |
+| `railway.toml` | Legacy — do not deploy |
+| `npm run worker` | Local dev only |

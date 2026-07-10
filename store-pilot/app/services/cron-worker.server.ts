@@ -1,5 +1,11 @@
 const LOG_PREFIX = "[cron-worker-health]";
 
+export const CRON_WORKER_ID_PREFIX = "cron-worker-";
+
+export function isEphemeralCronWorkerId(workerId: string | null | undefined): boolean {
+  return Boolean(workerId?.startsWith(CRON_WORKER_ID_PREFIX));
+}
+
 export type CronWorkerHealth = {
   queueEnabled: boolean;
   cronSecretConfigured: boolean;

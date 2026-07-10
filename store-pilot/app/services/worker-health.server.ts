@@ -4,6 +4,7 @@ import {
   countRecentCancelledBootstrapJobs,
   getJobQueueMetrics,
   type JobQueueMetrics,
+  type OrphanJobSummary,
 } from "./job.server";
 import {
   getExtendedJobQueueMetrics,
@@ -17,34 +18,70 @@ import {
 } from "./worker-registry.server";
 import { getWorkerRuntimeSnapshot } from "./worker-runtime.server";
 
+export type WorkerExecutionMode =
+  | "serverless_cron"
+  | "continuous_worker"
+  | "hybrid";
+
 export type WorkerInfrastructureHealth = {
   ok: boolean;
   status: "healthy" | "degraded" | "unhealthy";
+  executionMode: WorkerExecutionMode;
   timestamp: string;
   queue: JobQueueMetrics;
   queueExtended: ExtendedJobQueueMetrics;
   workers: WorkerRegistrySnapshot;
   runtime: ReturnType<typeof getWorkerRuntimeSnapshot>;
   processMetrics: ReturnType<typeof getWorkerRuntimeMetrics>;
-  cronFallback: ReturnType<typeof getCronWorkerHealth>;
-  orphanJobs: Awaited<ReturnType<typeof detectOrphanJobs>>;
+  cron: ReturnType<typeof getCronWorkerHealth>;
+  orphanJobs: OrphanJobSummary[];
   alerts: string[];
 };
+
+function resolveWorkerExecutionMode(input: {
+  cronEnabled: boolean;
+  activeWorkers: number;
+}): WorkerExecutionMode {
+  if (input.activeWorkers > 0 && input.cronEnabled) {
+    return "hybrid";
+  }
+
+  if (input.activeWorkers > 0) {
+    return "continuous_worker";
+  }
+
+  return "serverless_cron";
+}
+
+function filterOrphanJobsForHealth(input: {
+  orphanJobs: OrphanJobSummary[];
+  cronEnabled: boolean;
+}): OrphanJobSummary[] {
+  if (!input.cronEnabled) {
+    return input.orphanJobs;
+  }
+
+  return input.orphanJobs.filter((job) => job.reason === "lock_expired");
+}
 
 function buildAlerts(input: {
   queue: JobQueueMetrics;
   queueExtended: ExtendedJobQueueMetrics;
   workers: WorkerRegistrySnapshot;
-  orphanJobs: Awaited<ReturnType<typeof detectOrphanJobs>>;
+  orphanJobs: OrphanJobSummary[];
   cancelledBootstrapJobs: number;
+  cronEnabled: boolean;
 }): string[] {
   const alerts: string[] = [];
 
-  if (input.workers.activeWorkers === 0) {
-    alerts.push("no_active_workers");
+  if (input.workers.activeWorkers === 0 && !input.cronEnabled) {
+    alerts.push("no_worker_capacity");
   }
 
-  if (input.workers.staleWorkers > 0) {
+  if (
+    input.workers.staleWorkers > 0 &&
+    input.workers.activeWorkers + input.workers.staleWorkers > 0
+  ) {
     alerts.push(`stale_workers:${input.workers.staleWorkers}`);
   }
 
@@ -77,7 +114,7 @@ function buildAlerts(input: {
 }
 
 function resolveHealthStatus(alerts: string[]): WorkerInfrastructureHealth["status"] {
-  if (alerts.some((alert) => alert.startsWith("no_active_workers"))) {
+  if (alerts.some((alert) => alert.startsWith("no_worker_capacity"))) {
     return "unhealthy";
   }
 
@@ -91,7 +128,11 @@ function resolveHealthStatus(alerts: string[]): WorkerInfrastructureHealth["stat
 export async function getWorkerInfrastructureHealth(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<WorkerInfrastructureHealth> {
-  const activeWorkerIds = await getActiveWorkerIds(env);
+  const cron = getCronWorkerHealth(env);
+  const cronEnabled = cron.queueEnabled;
+  const activeWorkerIds = cronEnabled
+    ? undefined
+    : await getActiveWorkerIds(env);
   const [
     queue,
     queueExtended,
@@ -106,26 +147,36 @@ export async function getWorkerInfrastructureHealth(
     countRecentCancelledBootstrapJobs(),
   ]);
 
+  const significantOrphans = filterOrphanJobsForHealth({
+    orphanJobs,
+    cronEnabled,
+  });
+
   const alerts = buildAlerts({
     queue,
     queueExtended,
     workers,
-    orphanJobs,
+    orphanJobs: significantOrphans,
     cancelledBootstrapJobs,
+    cronEnabled,
   });
   const status = resolveHealthStatus(alerts);
 
   return {
     ok: status !== "unhealthy",
     status,
+    executionMode: resolveWorkerExecutionMode({
+      cronEnabled,
+      activeWorkers: workers.activeWorkers,
+    }),
     timestamp: new Date().toISOString(),
     queue,
     queueExtended,
     workers,
     runtime: getWorkerRuntimeSnapshot(),
     processMetrics: getWorkerRuntimeMetrics(),
-    cronFallback: getCronWorkerHealth(env),
-    orphanJobs,
+    cron,
+    orphanJobs: significantOrphans,
     alerts,
   };
 }

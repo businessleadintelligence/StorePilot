@@ -1,13 +1,13 @@
 # Worker Architecture
 
-**Date:** 2026-07-09  
-**Scope:** Infrastructure only — no business logic, Shopify sync, or AI changes
+**Date:** 2026-07-10 (RC3.5 serverless alignment)  
+**Scope:** Infrastructure only — no business logic changes
 
 ---
 
 ## Overview
 
-StorePilot uses a **Postgres-backed job queue** (`sync_jobs`) with a **continuous worker process** as the primary execution path. Vercel Cron (`POST /cron/worker`) remains as a **fallback** for environments without a dedicated worker deployment.
+StorePilot uses a **Postgres-backed job queue** (`sync_jobs`) executed by **Vercel Cron** in production. Each cron invocation runs a bounded batch cycle through the shared worker engine. No persistent background process is required.
 
 ```mermaid
 flowchart TB
@@ -20,15 +20,10 @@ flowchart TB
     subgraph queue [Postgres Queue]
         SJ[(sync_jobs)]
         JE[(job_events)]
-        WI[(worker_instances)]
     end
 
-    subgraph workers [Worker Layer]
-        CW[Continuous Worker<br/>npm run worker]
-        CRON[Vercel Cron Fallback<br/>/cron/worker]
-    end
-
-    subgraph execution [Execution Engine]
+    subgraph execution [Serverless Worker Layer]
+        CRON[Vercel Cron /cron/worker every 2 min]
         PREP[prepareWorkerQueue]
         CLAIM[claimNextJob]
         BEGIN[beginJobExecution]
@@ -36,15 +31,15 @@ flowchart TB
     end
 
     producers --> SJ
-    CW --> PREP
     CRON --> PREP
     PREP --> CLAIM
     CLAIM --> BEGIN
     BEGIN --> EXEC
     EXEC --> SJ
     EXEC --> JE
-    CW --> WI
 ```
+
+**Production topology:** GitHub → Vercel → Vercel Cron → Supabase → Shopify
 
 ---
 
@@ -54,36 +49,45 @@ flowchart TB
 |-----------|------|------|
 | Job queue service | `app/services/job.server.ts` | Enqueue, claim, lock, heartbeat, retry, dead-letter |
 | Worker engine | `app/services/worker.server.ts` | Job dispatch, onboarding finalization hooks |
-| Continuous runtime | `app/services/worker-runtime.server.ts` | Poll loop, graceful shutdown, orphan recovery |
-| Worker registry | `app/services/worker-registry.server.ts` | Instance registration, heartbeat, uptime |
+| Cron entry | `app/routes/cron.worker.tsx` | Authorized HTTP batch cycles |
+| Cron dispatch routes | `app/routes/cron.dispatch.$jobId.tsx` | Maintenance and intelligence scheduling |
+| Cron registry | `app/services/cron-scheduler.server.ts` | Schedule definitions + runners |
 | Queue metrics | `app/services/worker-metrics.server.ts` | Depth, latency, throughput |
 | Health aggregation | `app/services/worker-health.server.ts` | `/health/worker` payload |
-| Cron fallback | `app/routes/cron.worker.tsx` | HTTP-triggered batch cycles |
-| Worker entrypoint | `scripts/worker.ts` | `npm run worker` |
-| Worker container | `Dockerfile.worker` | Dedicated worker deployment |
+| Cron auth | `app/services/cron-auth.server.ts` | `CRON_SECRET` Bearer validation |
 
 ---
 
-## Deployment modes
+## Production deployment — Vercel Cron
 
-### Primary — Continuous worker (recommended)
+`vercel.json` schedules:
 
-```bash
-npm run worker
-```
+| Path | Schedule | Purpose |
+|------|----------|---------|
+| `/cron/worker` | `*/2 * * * *` | Process queued `sync_jobs` |
+| `/cron/dispatch/retry-queue` | `*/5 * * * *` | Release stale locks |
+| `/cron/dispatch/expired-sessions` | `0 * * * *` | Purge expired Shopify sessions |
+| `/cron/dispatch/privacy-pii-scan` | `0 1 * * *` | PII sampling audit |
+| `/cron/dispatch/cleanup-jobs` | `0 2 * * *` | Webhook + lease cleanup |
+| `/cron/dispatch/knowledge-refresh` | `0 3 * * *` | Enqueue connector sync jobs |
+| `/cron/dispatch/learning-engine` | `0 4 * * *` | Update learning profiles |
+| `/cron/dispatch/token-migration` | `0 5 * * *` | Encrypt legacy tokens |
+| `/cron/dispatch/daily-operating-plan` | `0 6 * * *` | Enqueue executive brief jobs |
+| `/cron/dispatch/recommendation-refresh` | `0 7,19 * * *` | Enqueue recommendation jobs |
+| `/cron/dispatch/scope-drift-monitor` | `0 8 * * *` | Scope drift alerts |
+| `/cron/dispatch/metrics-aggregation` | `0 */6 * * *` | Enqueue metrics recompute |
 
-Deploy `Dockerfile.worker` to Railway, Fly.io, Render, or any container platform with:
+Requires `CRON_SECRET` in Vercel production (Bearer auth auto-injected by Vercel Cron).
 
-- `DATABASE_URL` (pooler, `connection_limit=1`)
-- `DIRECT_URL` (migrations)
-- `CRON_SECRET`, Shopify env vars (worker loads store sessions)
-- Optional tuning: `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE`, `JOB_LOCK_DURATION_MS`
+---
 
-### Fallback — Vercel Cron
+## Execution flow
 
-`vercel.json` schedules `/cron/worker` every **2 minutes** (`*/2 * * * *`). Requires `CRON_SECRET` (Bearer auth auto-injected by Vercel).
-
-Use when continuous worker is unavailable; not sufficient alone for low-latency onboarding.
+1. Vercel Cron invokes `GET /cron/worker` with `Authorization: Bearer $CRON_SECRET`
+2. Route assigns ephemeral worker ID `cron-worker-{timestamp}`
+3. `runWorkerCycle()` → `prepareWorkerQueue()` (stale lock release + onboarding repair)
+4. Loop up to `CRON_JOB_BATCH_SIZE` (default 3, max 10): `claimNextJob` → `executeKnownJob`
+5. Job completion may enqueue pipeline continuation jobs for the next cron tick
 
 ---
 
@@ -94,11 +98,11 @@ Use when continuous worker is unavailable; not sufficient alone for low-latency 
 | Exclusive claim | `FOR UPDATE SKIP LOCKED` in `claimNextJob` |
 | Worker ownership | `lockedBy` + `workerGeneration` on every mutation |
 | Idempotent enqueue | Unique `idempotencyKey` |
-| Stale lock recovery | `releaseStaleJobs` + generation bump |
-| Orphan detection | `detectOrphanJobs` vs active `worker_instances` |
+| Stale lock recovery | `releaseStaleJobs` in every worker cycle + retry-queue cron |
 | Heartbeat extension | `withJobHeartbeat` every 60s during execution |
+| Cron lock semantics | Ephemeral `cron-worker-*` IDs excluded from false orphan detection |
 
-Multiple workers can run concurrently. Each claims distinct jobs; stale/crashed workers lose ownership via generation increment.
+Concurrent cron invocations are safe — each claims distinct jobs via Postgres row locks.
 
 ---
 
@@ -106,12 +110,12 @@ Multiple workers can run concurrently. Each claims distinct jobs; stale/crashed 
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WORKER_POLL_INTERVAL_MS` | 2000 | Idle poll interval |
-| `WORKER_BATCH_SIZE` | 3 | Jobs per cycle |
-| `WORKER_HEARTBEAT_INTERVAL_MS` | 15000 | Instance heartbeat |
-| `WORKER_STALE_THRESHOLD_MS` | 90000 | Worker considered offline |
+| `CRON_SECRET` | — | **Required** — authorizes cron routes |
+| `CRON_JOB_BATCH_SIZE` | 3 | Jobs per cron invocation (max 10) |
 | `JOB_LOCK_DURATION_MS` | 300000 | Visibility timeout |
-| `CRON_JOB_BATCH_SIZE` | 3 | Cron fallback batch size |
+| `WORKER_BATCH_SIZE` | 3 | Alias used when batch size unset |
+
+Optional tuning vars (`WORKER_POLL_INTERVAL_MS`, etc.) apply only to local `npm run worker` development — not production.
 
 ---
 
@@ -119,21 +123,31 @@ Multiple workers can run concurrently. Each claims distinct jobs; stale/crashed 
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /health/worker` | Queue depth, latency, active workers, orphans, alerts |
+| `GET /health/worker` | Queue depth, cron config, execution mode, alerts |
 | `GET /health/monitor` | Full platform report including worker check |
-| `GET /cron/worker` | Cron auth health (unauthorized GET) |
+| `GET /health/ready` | Startup readiness (prompts, migrations, env) |
+| `GET /cron/worker` | Cron auth probe (unauthorized GET returns config status) |
+
+**Serverless health model:** `/health/worker` returns healthy when `CRON_SECRET` is configured and queue metrics are acceptable. It does **not** require `activeWorkers > 0`.
+
+See [RC35_SERVERLESS_HEALTH_MODEL.md](./release/RC35_SERVERLESS_HEALTH_MODEL.md).
 
 ---
 
-## AI readiness
+## Legacy artifacts (not used in production)
 
-The worker engine already dispatches AI-adjacent job types (`metrics_recompute`, `recommendations_generate`, `executive_brief_generate`) without modification. Continuous processing ensures AI pipeline jobs are not blocked by daily cron schedules.
+| Artifact | Status |
+|----------|--------|
+| `scripts/worker.ts` + `npm run worker` | **Optional** — local dev / load testing only |
+| `Dockerfile.worker` | **Legacy** — not part of Vercel deployment |
+| `railway.toml` | **Legacy** — not part of Vercel deployment |
+| `worker_instances` table | **Optional telemetry** — not required for cron execution |
 
 ---
 
 ## Related docs
 
 - [JOB_LIFECYCLE.md](./JOB_LIFECYCLE.md) — state machine and transitions
-- [WORKER_INFRASTRUCTURE_REPORT.md](./WORKER_INFRASTRUCTURE_REPORT.md) — audit findings
-- [WORKER_MIGRATION_PLAN.md](./WORKER_MIGRATION_PLAN.md) — production rollout
-- [F42_WORKER_CRON_DEPLOYMENT.md](./F42_WORKER_CRON_DEPLOYMENT.md) — cron fallback setup
+- [RC4A_WORKER_ARCHITECTURE_CERTIFICATION.md](./release/RC4A_WORKER_ARCHITECTURE_CERTIFICATION.md) — architecture audit
+- [SERVERLESS_PRODUCTION_CERTIFICATE.md](./release/SERVERLESS_PRODUCTION_CERTIFICATE.md) — production certification
+- [DEPLOYMENT_PLAN.md](./release/DEPLOYMENT_PLAN.md) — deployment sequence

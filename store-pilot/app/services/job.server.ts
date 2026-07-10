@@ -10,6 +10,7 @@ import {
   type SyncJob,
 } from "@prisma/client";
 
+import { isEphemeralCronWorkerId } from "./cron-worker.server";
 import prisma from "../db.server";
 
 const LOG_PREFIX = "[job-service]";
@@ -893,7 +894,8 @@ export async function detectOrphanJobs(input?: {
     const workerOffline =
       input?.activeWorkerIds !== undefined &&
       job.lockedBy !== null &&
-      !input.activeWorkerIds.has(job.lockedBy);
+      !input.activeWorkerIds.has(job.lockedBy) &&
+      !isEphemeralCronWorkerId(job.lockedBy);
 
     if (lockExpired || workerOffline) {
       orphans.push({

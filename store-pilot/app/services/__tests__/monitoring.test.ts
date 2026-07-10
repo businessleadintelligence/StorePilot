@@ -82,6 +82,7 @@ beforeEach(() => {
   vi.mocked(getWorkerInfrastructureHealth).mockResolvedValue({
     ok: true,
     status: "healthy",
+    executionMode: "serverless_cron",
     timestamp: new Date().toISOString(),
     queue: {
       queued: 0,
@@ -125,7 +126,7 @@ beforeEach(() => {
       startedAt: new Date().toISOString(),
       uptimeMs: 0,
     },
-    cronFallback: {
+    cron: {
       cronSecretConfigured: true,
       queueEnabled: true,
     },
@@ -207,6 +208,7 @@ describe("monitoring.server", () => {
     vi.mocked(getWorkerInfrastructureHealth).mockResolvedValue({
       ok: true,
       status: "healthy",
+      executionMode: "serverless_cron",
       timestamp: new Date().toISOString(),
       queue: {
         queued: 0,
@@ -250,7 +252,7 @@ describe("monitoring.server", () => {
         startedAt: new Date().toISOString(),
         uptimeMs: 0,
       },
-      cronFallback: {
+      cron: {
         cronSecretConfigured: true,
         queueEnabled: true,
       },
