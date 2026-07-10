@@ -310,10 +310,29 @@ model Store {
   learningHistory             LearningHistory[]
   learningSnapshots           LearningSnapshot[]
   learningAttributions        LearningAttribution[]
+  metricsCache                StoreMetricsCache?
 
   @@index([active, subscriptionPlan])
   @@index([briefingTime])
   @@map("stores")
+}
+
+model StoreMetricsCache {
+  storeId            String   @id @db.Uuid
+  products           Int      @default(0)
+  activeProducts     Int      @default(0)
+  orders             Int      @default(0)
+  grossRevenue       Decimal  @default(0) @db.Decimal(14, 2)
+  averageOrderValue  Decimal  @default(0) @db.Decimal(14, 2)
+  lowStockProducts   Int      @default(0)
+  outOfStockProducts Int      @default(0)
+  inventoryUnits     Int      @default(0)
+  computedAt         DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([computedAt], map: "store_metrics_cache_computed_at_idx")
+  @@map("store_metrics_cache")
 }
 
 model User {

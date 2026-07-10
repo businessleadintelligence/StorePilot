@@ -832,25 +832,27 @@ export async function countRecentCancelledBootstrapJobs(
 }
 
 export async function getJobQueueMetrics(): Promise<JobQueueMetrics> {
-  const [queued, claimed, running, deadLetter, retrying, failed, cancelled] =
-    await Promise.all([
-      prisma.syncJob.count({ where: { status: JobStatus.queued } }),
-      prisma.syncJob.count({ where: { status: JobStatus.claimed } }),
-      prisma.syncJob.count({ where: { status: JobStatus.running } }),
-      prisma.syncJob.count({ where: { status: JobStatus.dead_letter } }),
-      prisma.syncJob.count({ where: { status: JobStatus.retrying } }),
-      prisma.syncJob.count({ where: { status: JobStatus.failed } }),
-      prisma.syncJob.count({ where: { status: JobStatus.cancelled } }),
-    ]);
+  const rows = await prisma.$queryRaw<
+    Array<{ status: JobStatus; count: bigint }>
+  >`
+    SELECT status, COUNT(*)::bigint AS count
+    FROM sync_jobs
+    GROUP BY status
+  `;
+
+  const counts = new Map<JobStatus, number>();
+  for (const row of rows) {
+    counts.set(row.status, Number(row.count));
+  }
 
   return {
-    queued,
-    claimed,
-    running,
-    deadLetter,
-    retrying,
-    failed,
-    cancelled,
+    queued: counts.get(JobStatus.queued) ?? 0,
+    claimed: counts.get(JobStatus.claimed) ?? 0,
+    running: counts.get(JobStatus.running) ?? 0,
+    deadLetter: counts.get(JobStatus.dead_letter) ?? 0,
+    retrying: counts.get(JobStatus.retrying) ?? 0,
+    failed: counts.get(JobStatus.failed) ?? 0,
+    cancelled: counts.get(JobStatus.cancelled) ?? 0,
   };
 }
 

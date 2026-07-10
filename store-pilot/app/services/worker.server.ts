@@ -2,6 +2,7 @@ import { JobStatus, JobType, type SyncJob } from "@prisma/client";
 
 import prisma from "../db.server";
 import { syncStoreConnectors } from "../connectors/core/connector-sync-engine";
+import { runPostAuthBootstrap } from "./after-auth-bootstrap.server";
 import { unauthenticated } from "../shopify.server";
 import {
   BILLING_LIMIT_EXCEEDED,
@@ -733,6 +734,14 @@ async function executeKnownJob(
         return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
       }
       case JobType.founder_maintenance: {
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.onboarding_bootstrap: {
+        await runPostAuthBootstrap({
+          storeId: job.storeId,
+          shop,
+          admin,
+        });
         return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
       }
       case JobType.knowledge_ingest:

@@ -1,15 +1,14 @@
 import type { JobStatus } from "@prisma/client";
-import type {
-  HeadersFunction,
-  LoaderFunctionArgs,
+import { Suspense, lazy } from "react";
+import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
+import {
+  Await,
+  useLoaderData,
 } from "react-router";
-import { useLoaderData } from "react-router";
 
 import { ExecutiveBriefCard } from "../components/ExecutiveBriefCard";
 import { HealthScoreCard } from "../components/HealthScoreCard";
 import { InsightsCard } from "../components/InsightsCard";
-import { QuickWinsCard } from "../components/QuickWinsCard";
-import { LearningBootstrapCard } from "../components/LearningBootstrapCard";
 import { MetricsOverviewCard } from "../components/MetricsOverviewCard";
 import { RecommendationsCard } from "../components/RecommendationsCard";
 import { SyncStatusCard } from "../components/SyncStatusCard";
@@ -18,6 +17,7 @@ import {
   PremiumSection,
   PremiumAsideCard,
 } from "../components/dashboard";
+import { DeferredSectionSkeleton } from "../components/dashboard/DeferredSectionSkeleton";
 import {
   IconPulse,
   IconSync,
@@ -25,6 +25,10 @@ import {
 } from "../components/dashboard/DashboardIcons";
 import styles from "../components/dashboard/premium-dashboard.module.css";
 import { formatCurrency, formatMetricNumber } from "../lib/format";
+import {
+  authenticateAdminOnce,
+  getSessionShop,
+} from "../lib/request-auth.server";
 import prisma from "../db.server";
 import {
   calculateExecutiveBrief,
@@ -37,14 +41,9 @@ import {
 import { getLearningBootstrapForUi } from "../services/learning-ui.server";
 import { getQuickWinsForDashboard } from "../services/quick-wins-ui.server";
 import { getExecutiveDashboardForUi } from "../services/executive-ui.server";
-import { ExecutiveDashboardCards } from "../executive/ui";
-import { RootCauseDashboardCards } from "../root-cause/ui";
 import { getRootCauseDashboardForUi } from "../services/root-cause-ui.server";
-import { PredictionDashboardCards } from "../prediction/ui";
 import { getPredictionDashboardForUi } from "../services/prediction-ui.server";
-import { ExperimentDashboardCards } from "../experiments/ui";
 import { getExperimentDashboardForUi } from "../services/experiment-ui.server";
-import { MerchantIntelligenceDashboard } from "../merchant-intelligence/ui";
 import { getMerchantIntelligenceDashboardForUi } from "../services/merchant-intelligence-ui.server";
 import { WorkspaceLaunchCard } from "../intelligence-ui";
 import { WORKSPACE_ROUTES } from "../intelligence-ui/constants";
@@ -69,32 +68,70 @@ import {
   getStoreSyncStatus,
   serializeStoreSyncStatusForLoader,
 } from "../services/sync-status.server";
-import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+const LearningBootstrapCard = lazy(
+  () =>
+    import("../components/LearningBootstrapCard").then((module) => ({
+      default: module.LearningBootstrapCard,
+    })),
+);
+const QuickWinsCard = lazy(() =>
+  import("../components/QuickWinsCard").then((module) => ({
+    default: module.QuickWinsCard,
+  })),
+);
+const ExecutiveDashboardCards = lazy(() =>
+  import("../executive/ui").then((module) => ({
+    default: module.ExecutiveDashboardCards,
+  })),
+);
+const RootCauseDashboardCards = lazy(() =>
+  import("../root-cause/ui").then((module) => ({
+    default: module.RootCauseDashboardCards,
+  })),
+);
+const PredictionDashboardCards = lazy(() =>
+  import("../prediction/ui").then((module) => ({
+    default: module.PredictionDashboardCards,
+  })),
+);
+const ExperimentDashboardCards = lazy(() =>
+  import("../experiments/ui").then((module) => ({
+    default: module.ExperimentDashboardCards,
+  })),
+);
+const MerchantIntelligenceDashboard = lazy(() =>
+  import("../merchant-intelligence/ui").then((module) => ({
+    default: module.MerchantIntelligenceDashboard,
+  })),
+);
+
+const EMPTY_SHELL = {
+  onboarding: null,
+  showOnboarding: false,
+  syncStatus: null,
+  metrics: null,
+  healthScore: null,
+  executiveBrief: null,
+  insights: null,
+  recommendations: null,
+  currency: "USD",
+  learningBootstrap: null,
+  quickWins: null,
+  executiveDashboard: null,
+  rootCause: null,
+  prediction: null,
+  experiments: null,
+  merchantIntelligence: null,
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { session } = await authenticateAdminOnce(request);
+  const shop = getSessionShop(session);
 
   if (!shop) {
-    return {
-      onboarding: null,
-      showOnboarding: false,
-      syncStatus: null,
-      metrics: null,
-      healthScore: null,
-      executiveBrief: null,
-      insights: null,
-      recommendations: null,
-      currency: "USD",
-      learningBootstrap: null,
-      quickWins: null,
-      executiveDashboard: null,
-      rootCause: null,
-      prediction: null,
-      experiments: null,
-      merchantIntelligence: null,
-    };
+    return EMPTY_SHELL;
   }
 
   const store = await prisma.store.findUnique({
@@ -103,24 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   if (!store) {
-    return {
-      onboarding: null,
-      showOnboarding: false,
-      syncStatus: null,
-      metrics: null,
-      healthScore: null,
-      executiveBrief: null,
-      insights: null,
-      recommendations: null,
-      currency: "USD",
-      learningBootstrap: null,
-      quickWins: null,
-      executiveDashboard: null,
-      rootCause: null,
-      prediction: null,
-      experiments: null,
-      merchantIntelligence: null,
-    };
+    return EMPTY_SHELL;
   }
 
   const [onboarding, syncStatus, metrics] = await Promise.all([
@@ -130,19 +150,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const healthScore = calculateStoreHealthScore(metrics);
-
   const serializedOnboarding = serializeOnboardingForLoader(onboarding);
-  const learningBootstrap = await getLearningBootstrapForUi(store.id, {
-    products: serializedOnboarding?.productSyncStatus,
-    inventory: serializedOnboarding?.inventorySyncStatus,
-    orders: serializedOnboarding?.ordersSyncStatus,
-  });
-  const quickWins = await getQuickWinsForDashboard(store.id, store.currency);
-  const executiveDashboard = await getExecutiveDashboardForUi(store.id, store.currency);
-  const rootCause = await getRootCauseDashboardForUi(store.id);
-  const prediction = await getPredictionDashboardForUi(store.id);
-  const experiments = await getExperimentDashboardForUi(store.id);
-  const merchantIntelligence = await getMerchantIntelligenceDashboardForUi(store.id);
 
   return {
     onboarding: serializedOnboarding,
@@ -173,17 +181,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     ),
     currency: store.currency,
-    learningBootstrap,
-    quickWins,
-    executiveDashboard,
-    rootCause,
-    prediction,
-    experiments,
-    merchantIntelligence,
+    learningBootstrap: getLearningBootstrapForUi(store.id, {
+      products: serializedOnboarding?.productSyncStatus,
+      inventory: serializedOnboarding?.inventorySyncStatus,
+      orders: serializedOnboarding?.ordersSyncStatus,
+    }),
+    quickWins: getQuickWinsForDashboard(store.id, store.currency),
+    executiveDashboard: getExecutiveDashboardForUi(store.id, store.currency),
+    rootCause: getRootCauseDashboardForUi(store.id),
+    prediction: getPredictionDashboardForUi(store.id),
+    experiments: getExperimentDashboardForUi(store.id),
+    merchantIntelligence: getMerchantIntelligenceDashboardForUi(store.id),
   };
 };
 
 export default function Index() {
+  const data = useLoaderData<typeof loader>();
   const {
     onboarding,
     showOnboarding,
@@ -201,7 +214,7 @@ export default function Index() {
     prediction,
     experiments,
     merchantIntelligence,
-  } = useLoaderData<typeof loader>();
+  } = data;
 
   return (
     <s-page heading="StorePilot">
@@ -254,31 +267,101 @@ export default function Index() {
           </div>
         </PremiumSection>
 
-        {showOnboarding && learningBootstrap ? (
-          <LearningBootstrapCard learning={learningBootstrap} />
+        {showOnboarding ? (
+          <Suspense
+            fallback={
+              <DeferredSectionSkeleton title="Loading setup progress…" />
+            }
+          >
+            <Await resolve={learningBootstrap}>
+              {(learning) =>
+                learning ? <LearningBootstrapCard learning={learning} /> : null
+              }
+            </Await>
+          </Suspense>
         ) : null}
 
-        {quickWins ? <QuickWinsCard quickWins={quickWins} currency={currency} /> : null}
+        <Suspense
+          fallback={<DeferredSectionSkeleton title="Loading quick wins…" />}
+        >
+          <Await resolve={quickWins}>
+            {(wins) =>
+              wins ? <QuickWinsCard quickWins={wins} currency={currency} /> : null
+            }
+          </Await>
+        </Suspense>
 
-        {executiveDashboard ? (
-          <ExecutiveDashboardCards executive={executiveDashboard} />
-        ) : null}
+        <Suspense
+          fallback={
+            <DeferredSectionSkeleton title="Loading executive intelligence…" />
+          }
+        >
+          <Await resolve={executiveDashboard}>
+            {(executive) =>
+              executive ? (
+                <ExecutiveDashboardCards executive={executive} />
+              ) : null
+            }
+          </Await>
+        </Suspense>
 
-        {rootCause ? (
-          <RootCauseDashboardCards rootCause={rootCause} currency={currency} />
-        ) : null}
+        <Suspense
+          fallback={
+            <DeferredSectionSkeleton title="Loading root cause analysis…" />
+          }
+        >
+          <Await resolve={rootCause}>
+            {(causes) =>
+              causes ? (
+                <RootCauseDashboardCards rootCause={causes} currency={currency} />
+              ) : null
+            }
+          </Await>
+        </Suspense>
 
-        {prediction ? (
-          <PredictionDashboardCards prediction={prediction} currency={currency} />
-        ) : null}
+        <Suspense
+          fallback={<DeferredSectionSkeleton title="Loading predictions…" />}
+        >
+          <Await resolve={prediction}>
+            {(predictions) =>
+              predictions ? (
+                <PredictionDashboardCards
+                  prediction={predictions}
+                  currency={currency}
+                />
+              ) : null
+            }
+          </Await>
+        </Suspense>
 
-        {experiments ? (
-          <ExperimentDashboardCards experiments={experiments} currency={currency} />
-        ) : null}
+        <Suspense
+          fallback={<DeferredSectionSkeleton title="Loading experiments…" />}
+        >
+          <Await resolve={experiments}>
+            {(experimentData) =>
+              experimentData ? (
+                <ExperimentDashboardCards
+                  experiments={experimentData}
+                  currency={currency}
+                />
+              ) : null
+            }
+          </Await>
+        </Suspense>
 
-        {merchantIntelligence ? (
-          <MerchantIntelligenceDashboard intelligence={merchantIntelligence} />
-        ) : null}
+        <Suspense
+          fallback={
+            <DeferredSectionSkeleton title="Loading merchant intelligence…" />
+          }
+        >
+          <Await resolve={merchantIntelligence}>
+            {(intelligence) =>
+              intelligence ? (
+                <MerchantIntelligenceDashboard intelligence={intelligence} />
+              ) : null
+            }
+          </Await>
+        </Suspense>
 
         {syncStatus ? (
           <SyncStatusCard
@@ -308,7 +391,9 @@ export default function Index() {
 
         {insights ? <InsightsCard insights={insights} /> : null}
 
-        {recommendations ? <RecommendationsCard recommendations={recommendations} /> : null}
+        {recommendations ? (
+          <RecommendationsCard recommendations={recommendations} />
+        ) : null}
       </div>
 
       <s-section slot="aside">
@@ -340,7 +425,8 @@ export default function Index() {
               badge={<s-badge tone="info">In progress</s-badge>}
             >
               <p className={styles.sectionSubtitle}>
-                {onboarding.progressLabel ?? "Store setup is running in the background."}
+                {onboarding.progressLabel ??
+                  "Store setup is running in the background."}
               </p>
               <div className={styles.progressTrack} style={{ marginTop: 12 }}>
                 <div
@@ -359,8 +445,8 @@ export default function Index() {
               badge={<s-badge tone="success">Ready</s-badge>}
             >
               <p className={styles.sectionSubtitle}>
-                Your dashboard is live. Metrics and briefings populate as StorePilot
-                analyzes your store.
+                Your dashboard is live. Metrics and briefings populate as
+                StorePilot analyzes your store.
               </p>
             </PremiumAsideCard>
           )}

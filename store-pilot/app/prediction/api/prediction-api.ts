@@ -5,6 +5,7 @@ export async function getPredictions(storeId: string) {
   return prisma.prediction.findMany({
     where: { storeId, active: true },
     orderBy: [{ rankScore: "desc" }],
+    take: 20,
     include: {
       preventionActions: {
         where: { active: true },

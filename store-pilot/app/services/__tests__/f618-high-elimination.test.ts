@@ -204,21 +204,29 @@ describe("F.6.18 H4/H5 — webhook lease ACK loss", () => {
   });
 });
 
-describe("F.6.18 H6 — webhook registration failure aborts bootstrap", () => {
-  it("continues subscription bootstrap after webhook registration failure is logged", () => {
-    const source = readFileSync(
+describe("F.6.18 H6 — webhook registration failure does not block OAuth", () => {
+  it("queues post-auth bootstrap after webhook registration failure is logged", () => {
+    const shopifySource = readFileSync(
       resolve(process.cwd(), "app/shopify.server.ts"),
       "utf8",
     );
+    const bootstrapSource = readFileSync(
+      resolve(process.cwd(), "app/services/after-auth-bootstrap.server.ts"),
+      "utf8",
+    );
 
-    const failureMarker = source.indexOf("webhook_registration_required");
-    const subscriptionMarker = source.indexOf(
+    const failureMarker = shopifySource.indexOf("webhook_registration_required");
+    const enqueueMarker = shopifySource.indexOf(
+      "await schedulePostAuthBootstrapJob(storeId)",
+    );
+    const subscriptionMarker = bootstrapSource.indexOf(
       "await ensureSubscriptionForActiveStore(store.id)",
     );
 
     expect(failureMarker).toBeGreaterThan(-1);
-    expect(subscriptionMarker).toBeGreaterThan(failureMarker);
-    expect(source).toContain("continuing bootstrap");
+    expect(enqueueMarker).toBeGreaterThan(failureMarker);
+    expect(subscriptionMarker).toBeGreaterThan(-1);
+    expect(shopifySource).not.toContain("bootstrapIntelligenceAfterAuth");
   });
 });
 

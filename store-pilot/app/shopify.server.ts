@@ -14,20 +14,9 @@ import {
 
 import prisma from "./db.server";
 import { SHOPIFY_ADMIN_API_VERSION_STRING } from "./shopify-api-version.server";
-import {
-  BootstrapSubscriptionError,
-  ensureSubscriptionForActiveStore,
-} from "./services/billing.server";
 import { EncryptedPrismaSessionStorage } from "./services/encrypted-session-storage.server";
-import {
-  advanceOnboarding,
-  getOrCreateStoreOnboarding,
-} from "./services/onboarding.server";
-import { ensureOrdersSchedulerActive } from "./services/orders-scheduler.server";
-import { bootstrapIntelligenceAfterAuth } from "./learning/scheduler/learning-bootstrap-scheduler";
-import { ensureStoreBackfillAfterReinstall } from "./services/store-backfill.server";
+import { schedulePostAuthBootstrapJob } from "./services/after-auth-bootstrap.server";
 import { upsertStoreFromSession } from "./services/store.server";
-import { upsertOwnerFromSession } from "./services/user.server";
 
 const LOG_PREFIX = "[after-auth]";
 
@@ -37,15 +26,12 @@ type AfterAuthLogContext = {
   shop: string;
   storeId?: string;
   operation:
-    | "onboarding_initialized"
-    | "onboarding_advanced"
+    | "store_persisted"
     | "onboarding_skipped"
-    | "onboarding_failed"
-    | "webhook_registration_required";
+    | "webhook_registration_required"
+    | "post_auth_bootstrap_enqueued"
+    | "post_auth_bootstrap_enqueue_failed";
   reason?: string;
-  action?: string;
-  phase?: string | null;
-  jobId?: string;
 };
 
 function logAfterAuth(
@@ -86,7 +72,7 @@ const shopifyAppConfig = {
       admin: Parameters<typeof upsertStoreFromSession>[1];
     }) => {
       if (!session.shop) {
-        logAfterAuth("error", "Session missing shop during afterAuth bootstrap", {
+        logAfterAuth("error", "Session missing shop during afterAuth", {
           shop: "unknown",
           operation: "onboarding_skipped",
           reason: "missing_session_shop",
@@ -94,10 +80,12 @@ const shopifyAppConfig = {
         return;
       }
 
+      let storeId: string;
       try {
-        await upsertStoreFromSession(session, admin);
+        const upsert = await upsertStoreFromSession(session, admin);
+        storeId = upsert.storeId;
       } catch (error) {
-        logAfterAuth("error", "Store upsert failed during afterAuth bootstrap", {
+        logAfterAuth("error", "Store upsert failed during afterAuth", {
           shop: session.shop,
           operation: "onboarding_skipped",
           reason:
@@ -109,81 +97,33 @@ const shopifyAppConfig = {
       try {
         await shopifyAppInstance.registerWebhooks({ session });
       } catch (error) {
-        logAfterAuth("error", "Webhook runtime registration failed; continuing bootstrap", {
+        logAfterAuth("error", "Webhook runtime registration failed; continuing", {
           shop: session.shop,
+          storeId,
           operation: "webhook_registration_required",
           reason: error instanceof Error ? error.message : "webhook_registration_failed",
         });
       }
 
-      try {
-        await upsertOwnerFromSession(session, admin);
-      } catch (error) {
-        console.error("[user-sync]", {
-          shop: session.shop,
-          operation: "after_auth",
-          reason: error instanceof Error ? error.message : "unknown_error",
-        });
-      }
+      logAfterAuth("info", "Session persisted and store record ready", {
+        shop: session.shop,
+        storeId,
+        operation: "store_persisted",
+      });
 
       try {
-        const store = await prisma.store.findUnique({
-          where: { shopifyDomain: session.shop },
-          select: { id: true, active: true },
-        });
-
-        if (!store?.active) {
-          logAfterAuth("error", "Store is not eligible for onboarding bootstrap", {
-            shop: session.shop,
-            operation: "onboarding_skipped",
-            reason: !store ? "store_not_found" : "store_inactive",
-          });
-          return;
-        }
-
-        await ensureSubscriptionForActiveStore(store.id);
-        await getOrCreateStoreOnboarding(store.id);
-        await ensureStoreBackfillAfterReinstall(store.id);
-        await ensureOrdersSchedulerActive(store.id);
-
-        try {
-          await bootstrapIntelligenceAfterAuth({ storeId: store.id, admin });
-        } catch (error) {
-          logAfterAuth("error", "Bootstrap intelligence profiling failed; continuing onboarding", {
-            shop: session.shop,
-            storeId: store.id,
-            operation: "onboarding_initialized",
-            reason: error instanceof Error ? error.message : "bootstrap_intelligence_failed",
-          });
-        }
-
-        logAfterAuth("info", "Store onboarding initialized", {
+        await schedulePostAuthBootstrapJob(storeId);
+        logAfterAuth("info", "Post-auth bootstrap queued for background worker", {
           shop: session.shop,
-          storeId: store.id,
-          operation: "onboarding_initialized",
-        });
-
-        const advanceResult = await advanceOnboarding({ storeId: store.id });
-        logAfterAuth("info", "Store onboarding advanced", {
-          shop: session.shop,
-          storeId: store.id,
-          operation: "onboarding_advanced",
-          action: advanceResult.action,
-          phase: advanceResult.phase,
-          jobId: advanceResult.jobId,
+          storeId,
+          operation: "post_auth_bootstrap_enqueued",
         });
       } catch (error) {
-        const reason =
-          error instanceof BootstrapSubscriptionError
-            ? error.reason
-            : error instanceof Error
-              ? error.message
-              : "unknown_error";
-
-        logAfterAuth("error", "Store onboarding bootstrap failed", {
+        logAfterAuth("error", "Failed to enqueue post-auth bootstrap job", {
           shop: session.shop,
-          operation: "onboarding_failed",
-          reason,
+          storeId,
+          operation: "post_auth_bootstrap_enqueue_failed",
+          reason: error instanceof Error ? error.message : "enqueue_failed",
         });
       }
     },

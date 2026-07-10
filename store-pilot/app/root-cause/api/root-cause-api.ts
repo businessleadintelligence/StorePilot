@@ -8,6 +8,7 @@ export async function getRootCauses(storeId: string) {
   return prisma.rootCause.findMany({
     where: { storeId, active: true },
     orderBy: [{ rankScore: "desc" }],
+    take: 20,
   });
 }
 

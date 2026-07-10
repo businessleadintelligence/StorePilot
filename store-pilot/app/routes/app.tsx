@@ -4,13 +4,18 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 
 import { WORKSPACE_NAV, WORKSPACE_ROUTES } from "../intelligence-ui/constants";
-import { authenticate } from "../shopify.server";
+import {
+  authenticateAdminOnce,
+  getSessionShop,
+} from "../lib/request-auth.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticateAdminOnce(request);
 
-  // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return {
+    apiKey: process.env.SHOPIFY_API_KEY || "",
+    shop: getSessionShop(session) ?? null,
+  };
 };
 
 export default function App() {

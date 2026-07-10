@@ -4,7 +4,7 @@ import prisma from "../db.server";
 import { updateMerchantLearningProfile } from "../operations/operations-metrics";
 import { loadOperationsSnapshot, saveOperationsSnapshot } from "../operations/operations-persistence";
 import { enqueueJob, releaseStaleJobs } from "./job.server";
-import { getStoreMetrics } from "./metrics.server";
+import { recomputeStoreMetricsCache } from "./metrics.server";
 import { getStoreRecommendations } from "./recommendations.server";
 import {
   purgeAgedOperationalRecords,
@@ -376,7 +376,7 @@ export async function executeExecutiveBriefJob(storeId: string): Promise<void> {
 }
 
 export async function executeMetricsRecomputeJob(storeId: string): Promise<void> {
-  await getStoreMetrics(storeId);
+  await recomputeStoreMetricsCache(storeId);
 }
 
 export async function executeRecommendationsGenerateJob(storeId: string): Promise<void> {

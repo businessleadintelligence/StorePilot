@@ -22,6 +22,7 @@ const LOG_PREFIX = "[onboarding]";
 const ONBOARDING_JOB_MAX_ATTEMPTS = 5;
 const DEFAULT_STUCK_MINUTES = 30;
 const DEFAULT_HEARTBEAT_STALE_MINUTES = 10;
+const STUCK_ONBOARDING_BATCH_SIZE = 50;
 
 type LogLevel = "info" | "warn" | "error";
 
@@ -638,6 +639,8 @@ export async function finalizeBlockedJobPhase(input: {
   );
 }
 
+const RECONCILE_ONBOARDING_BATCH_SIZE = 50;
+
 export async function reconcileOnboardingWithCompletedJobs(): Promise<number> {
   const rows = await prisma.storeOnboarding.findMany({
     where: {
@@ -651,6 +654,8 @@ export async function reconcileOnboardingWithCompletedJobs(): Promise<number> {
     include: {
       currentJob: true,
     },
+    take: RECONCILE_ONBOARDING_BATCH_SIZE,
+    orderBy: { updatedAt: "asc" },
   });
 
   let repaired = 0;
@@ -1323,11 +1328,21 @@ export async function findStuckOnboarding(input?: {
       ],
     },
     include: {
-      currentJob: true,
+      currentJob: {
+        select: {
+          id: true,
+          status: true,
+          lockExpiresAt: true,
+          heartbeatAt: true,
+          jobType: true,
+          errorMessage: true,
+        },
+      },
     },
     orderBy: {
       updatedAt: "asc",
     },
+    take: STUCK_ONBOARDING_BATCH_SIZE,
   });
 
   return rows.map((row) => ({
