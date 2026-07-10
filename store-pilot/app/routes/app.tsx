@@ -8,14 +8,41 @@ import {
   authenticateAdminOnce,
   getSessionShop,
 } from "../lib/request-auth.server";
+import {
+  getRequestLogContext,
+  logRouteLoader,
+} from "../lib/route-loader-log.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticateAdminOnce(request);
+  const { route, requestId } = getRequestLogContext(request);
 
-  return {
-    apiKey: process.env.SHOPIFY_API_KEY || "",
-    shop: getSessionShop(session) ?? null,
-  };
+  try {
+    const { session } = await authenticateAdminOnce(request);
+    const shop = getSessionShop(session) ?? null;
+
+    logRouteLoader("info", "App layout loader completed", {
+      route,
+      function: "loader",
+      shop,
+      requestId,
+      operation: "app_layout_loaded",
+    });
+
+    return {
+      apiKey: process.env.SHOPIFY_API_KEY || "",
+      shop,
+    };
+  } catch (error) {
+    logRouteLoader("error", "App layout loader failed", {
+      route,
+      function: "loader",
+      requestId,
+      operation: "app_layout_loader_failed",
+      reason: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
+  }
 };
 
 export default function App() {

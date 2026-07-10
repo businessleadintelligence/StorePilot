@@ -22,12 +22,15 @@ import {
   getOnboardingReminders,
   serializeMerchantOnboardingRemindersForLoader,
 } from "../onboarding/onboarding-service";
-import { authenticate } from "../shopify.server";
+import {
+  authenticateAdminOnce,
+  getSessionShop,
+} from "../lib/request-auth.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { session } = await authenticateAdminOnce(request);
+  const shop = getSessionShop(session);
 
   if (!shop) {
     return { dashboard: null, onboardingReminders: [] };
@@ -42,20 +45,33 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return { dashboard: null, onboardingReminders: [] };
   }
 
-  const [dashboard, onboardingReminders] = await Promise.all([
-    getExecutiveDashboard(store.id, store.currency).then(serializeExecutiveDashboardForLoader),
-    getOnboardingReminders(store.id),
-  ]);
+  const onboardingReminders = serializeMerchantOnboardingRemindersForLoader(
+    await getOnboardingReminders(store.id),
+  );
+
+  let dashboard = null;
+  try {
+    dashboard = serializeExecutiveDashboardForLoader(
+      await getExecutiveDashboard(store.id, store.currency),
+    );
+  } catch (error) {
+    console.error("[coo-dashboard]", {
+      message: "Executive COO dashboard loader failed",
+      storeId: store.id,
+      shop,
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+  }
 
   return {
     dashboard,
-    onboardingReminders: serializeMerchantOnboardingRemindersForLoader(onboardingReminders),
+    onboardingReminders,
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { session } = await authenticateAdminOnce(request);
+  const shop = getSessionShop(session);
 
   if (!shop) {
     return Response.json({ ok: false, error: "missing_shop" }, { status: 400 });

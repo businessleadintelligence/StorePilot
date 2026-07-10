@@ -19,23 +19,39 @@ export async function getProductionHealthDashboard(
     return cached.dashboard;
   }
 
-  const snapshot = await runProductionHealthEngine(storeId);
-  const dashboard = buildProductionDashboard(snapshot);
-  cache.set(storeId, {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    dashboard,
-  });
-  return dashboard;
+  try {
+    const snapshot = await runProductionHealthEngine(storeId);
+    const dashboard = buildProductionDashboard(snapshot);
+    cache.set(storeId, {
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      dashboard,
+    });
+    return dashboard;
+  } catch (error) {
+    console.error("[production-health]", {
+      message: "Production health dashboard unavailable",
+      storeId,
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    if (cached) {
+      return cached.dashboard;
+    }
+    throw error;
+  }
 }
 
 export async function getProductionHealthBadge(storeId: string) {
-  const cached = cache.get(storeId);
-  if (cached && !isProductionSnapshotStale(cached.dashboard, CACHE_TTL_MS)) {
-    return cached.dashboard.settingsBadge;
-  }
+  try {
+    const cached = cache.get(storeId);
+    if (cached && !isProductionSnapshotStale(cached.dashboard, CACHE_TTL_MS)) {
+      return cached.dashboard.settingsBadge;
+    }
 
-  const dashboard = await getProductionHealthDashboard(storeId);
-  return dashboard.settingsBadge;
+    const dashboard = await getProductionHealthDashboard(storeId);
+    return dashboard.settingsBadge;
+  } catch {
+    return badgeFromLevel("unknown");
+  }
 }
 
 export function serializeProductionDashboardForRoute(

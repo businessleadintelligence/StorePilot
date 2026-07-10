@@ -32,6 +32,7 @@ type AfterAuthLogContext = {
     | "post_auth_bootstrap_enqueued"
     | "post_auth_bootstrap_enqueue_failed";
   reason?: string;
+  stack?: string;
 };
 
 function logAfterAuth(
@@ -90,6 +91,7 @@ const shopifyAppConfig = {
           operation: "onboarding_skipped",
           reason:
             error instanceof Error ? error.message : "store_upsert_failed",
+          stack: error instanceof Error ? error.stack : undefined,
         });
         return;
       }

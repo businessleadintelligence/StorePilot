@@ -2,15 +2,15 @@ import { buildConnectorDataQualityWarnings } from "../connectors/core/data-quali
 import type { ConnectorId } from "../connectors/core/connector.types";
 import { getClarityIntegrationPublicView } from "../services/clarity-integration.server";
 import { getGoogleIntegrationPublicView } from "../services/google-integration.server";
-import { getProductionHealthBadge } from "../production/production-service";
+import { getCachedProductionBadge } from "../production/production-service";
 import type { OnboardingReminder } from "./onboarding-types";
 
 export async function buildOnboardingReminders(storeId: string): Promise<OnboardingReminder[]> {
-  const [google, clarity, healthBadge] = await Promise.all([
+  const [google, clarity] = await Promise.all([
     getGoogleIntegrationPublicView(storeId),
     getClarityIntegrationPublicView(storeId),
-    getProductionHealthBadge(storeId),
   ]);
+  const healthBadge = getCachedProductionBadge(storeId);
 
   const presentConnectorIds: ConnectorId[] = [];
   if (google.connected && google.lastSyncAt) presentConnectorIds.push("ga4");

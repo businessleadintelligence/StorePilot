@@ -1,9 +1,10 @@
 import type { JobStatus } from "@prisma/client";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useRef } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import {
   Await,
   useLoaderData,
+  useRevalidator,
 } from "react-router";
 
 import { ExecutiveBriefCard } from "../components/ExecutiveBriefCard";
@@ -25,6 +26,12 @@ import {
 } from "../components/dashboard/DashboardIcons";
 import styles from "../components/dashboard/premium-dashboard.module.css";
 import { formatCurrency, formatMetricNumber } from "../lib/format";
+import { isReactRouterDataRequest } from "../lib/react-router-request.server";
+import {
+  deferIntelligenceSection,
+  getRequestLogContext,
+  logRouteLoader,
+} from "../lib/route-loader-log.server";
 import {
   authenticateAdminOnce,
   getSessionShop,
@@ -117,6 +124,7 @@ const EMPTY_SHELL = {
   insights: null,
   recommendations: null,
   currency: "USD",
+  deferIntelligenceLoad: false,
   learningBootstrap: null,
   quickWins: null,
   executiveDashboard: null,
@@ -126,77 +134,170 @@ const EMPTY_SHELL = {
   merchantIntelligence: null,
 };
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticateAdminOnce(request);
-  const shop = getSessionShop(session);
+const EMPTY_INTELLIGENCE = {
+  learningBootstrap: null,
+  quickWins: null,
+  executiveDashboard: null,
+  rootCause: null,
+  prediction: null,
+  experiments: null,
+  merchantIntelligence: null,
+} as const;
 
-  if (!shop) {
-    return EMPTY_SHELL;
-  }
-
-  const store = await prisma.store.findUnique({
-    where: { shopifyDomain: shop },
-    select: { id: true, currency: true },
-  });
-
-  if (!store) {
-    return EMPTY_SHELL;
-  }
-
-  const [onboarding, syncStatus, metrics] = await Promise.all([
-    getOnboardingStatus(store.id),
-    getStoreSyncStatus(store.id),
-    getStoreMetrics(store.id),
-  ]);
-
-  const healthScore = calculateStoreHealthScore(metrics);
-  const serializedOnboarding = serializeOnboardingForLoader(onboarding);
-
+function loadIntelligenceSections(
+  storeId: string,
+  currency: string,
+  logContext: {
+    shop: string | null;
+    route: string;
+    requestId: string | null;
+  },
+  onboardingPhase?: {
+    products?: string;
+    inventory?: string;
+    orders?: string;
+  },
+) {
+  const ctx = { ...logContext, storeId };
   return {
-    onboarding: serializedOnboarding,
-    showOnboarding: shouldShowOnboardingCardFromLoader(serializedOnboarding),
-    syncStatus: serializeStoreSyncStatusForLoader(syncStatus),
-    metrics: serializeMetricsForLoader(metrics),
-    healthScore: serializeHealthScoreForLoader(healthScore),
-    executiveBrief: serializeExecutiveBriefForLoader(
-      calculateExecutiveBrief({
-        metrics,
-        healthScore,
-        syncStatus,
-        currency: store.currency,
-      }),
+    learningBootstrap: deferIntelligenceSection(
+      "getLearningBootstrapForUi",
+      ctx,
+      () => getLearningBootstrapForUi(storeId, onboardingPhase),
     ),
-    insights: serializeInsightsForLoader(
-      buildStoreInsights({
-        metrics,
-        onboarding,
-        healthScore,
-      }),
+    quickWins: deferIntelligenceSection("getQuickWinsForDashboard", ctx, () =>
+      getQuickWinsForDashboard(storeId, currency),
     ),
-    recommendations: serializeRecommendationsForLoader(
-      buildStoreRecommendations({
-        metrics,
-        onboarding,
-        healthScore,
-      }),
+    executiveDashboard: deferIntelligenceSection(
+      "getExecutiveDashboardForUi",
+      ctx,
+      () => getExecutiveDashboardForUi(storeId, currency),
     ),
-    currency: store.currency,
-    learningBootstrap: getLearningBootstrapForUi(store.id, {
+    rootCause: deferIntelligenceSection("getRootCauseDashboardForUi", ctx, () =>
+      getRootCauseDashboardForUi(storeId),
+    ),
+    prediction: deferIntelligenceSection("getPredictionDashboardForUi", ctx, () =>
+      getPredictionDashboardForUi(storeId),
+    ),
+    experiments: deferIntelligenceSection("getExperimentDashboardForUi", ctx, () =>
+      getExperimentDashboardForUi(storeId),
+    ),
+    merchantIntelligence: deferIntelligenceSection(
+      "getMerchantIntelligenceDashboardForUi",
+      ctx,
+      () => getMerchantIntelligenceDashboardForUi(storeId),
+    ),
+  };
+}
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { route, requestId } = getRequestLogContext(request);
+
+  try {
+    const { session } = await authenticateAdminOnce(request);
+    const shop = getSessionShop(session) ?? null;
+
+    if (!shop) {
+      return EMPTY_SHELL;
+    }
+
+    const store = await prisma.store.findUnique({
+      where: { shopifyDomain: shop },
+      select: { id: true, currency: true },
+    });
+
+    if (!store) {
+      logRouteLoader("info", "Dashboard shell — store not found yet", {
+        route,
+        function: "loader",
+        shop,
+        requestId,
+        operation: "dashboard_empty_shell",
+      });
+      return EMPTY_SHELL;
+    }
+
+    const [onboarding, syncStatus, metrics] = await Promise.all([
+      getOnboardingStatus(store.id),
+      getStoreSyncStatus(store.id),
+      getStoreMetrics(store.id),
+    ]);
+
+    const healthScore = calculateStoreHealthScore(metrics);
+    const serializedOnboarding = serializeOnboardingForLoader(onboarding);
+    const loadIntelligence = isReactRouterDataRequest(request);
+    const onboardingPhase = {
       products: serializedOnboarding?.productSyncStatus,
       inventory: serializedOnboarding?.inventorySyncStatus,
       orders: serializedOnboarding?.ordersSyncStatus,
-    }),
-    quickWins: getQuickWinsForDashboard(store.id, store.currency),
-    executiveDashboard: getExecutiveDashboardForUi(store.id, store.currency),
-    rootCause: getRootCauseDashboardForUi(store.id),
-    prediction: getPredictionDashboardForUi(store.id),
-    experiments: getExperimentDashboardForUi(store.id),
-    merchantIntelligence: getMerchantIntelligenceDashboardForUi(store.id),
-  };
+    };
+
+    logRouteLoader("info", "Dashboard loader completed shell", {
+      route,
+      function: "loader",
+      shop,
+      storeId: store.id,
+      requestId,
+      operation: loadIntelligence
+        ? "dashboard_data_with_intelligence"
+        : "dashboard_document_shell",
+    });
+
+    return {
+      onboarding: serializedOnboarding,
+      showOnboarding: shouldShowOnboardingCardFromLoader(serializedOnboarding),
+      syncStatus: serializeStoreSyncStatusForLoader(syncStatus),
+      metrics: serializeMetricsForLoader(metrics),
+      healthScore: serializeHealthScoreForLoader(healthScore),
+      executiveBrief: serializeExecutiveBriefForLoader(
+        calculateExecutiveBrief({
+          metrics,
+          healthScore,
+          syncStatus,
+          currency: store.currency,
+        }),
+      ),
+      insights: serializeInsightsForLoader(
+        buildStoreInsights({
+          metrics,
+          onboarding,
+          healthScore,
+        }),
+      ),
+      recommendations: serializeRecommendationsForLoader(
+        buildStoreRecommendations({
+          metrics,
+          onboarding,
+          healthScore,
+        }),
+      ),
+      currency: store.currency,
+      deferIntelligenceLoad: !loadIntelligence,
+      ...(loadIntelligence
+        ? loadIntelligenceSections(store.id, store.currency, {
+            shop,
+            route,
+            requestId,
+          }, onboardingPhase)
+        : EMPTY_INTELLIGENCE),
+    };
+  } catch (error) {
+    logRouteLoader("error", "Dashboard loader failed", {
+      route,
+      function: "loader",
+      requestId,
+      operation: "dashboard_loader_failed",
+      reason: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return EMPTY_SHELL;
+  }
 };
 
 export default function Index() {
   const data = useLoaderData<typeof loader>();
+  const revalidator = useRevalidator();
+  const intelligenceRevalidatedRef = useRef(false);
   const {
     onboarding,
     showOnboarding,
@@ -207,6 +308,7 @@ export default function Index() {
     insights,
     recommendations,
     currency,
+    deferIntelligenceLoad,
     learningBootstrap,
     quickWins,
     executiveDashboard,
@@ -215,6 +317,21 @@ export default function Index() {
     experiments,
     merchantIntelligence,
   } = data;
+
+  const { revalidate, state: revalidatorState } = revalidator;
+
+  useEffect(() => {
+    if (
+      !deferIntelligenceLoad ||
+      intelligenceRevalidatedRef.current ||
+      revalidatorState !== "idle"
+    ) {
+      return;
+    }
+
+    intelligenceRevalidatedRef.current = true;
+    revalidate();
+  }, [deferIntelligenceLoad, revalidatorState, revalidate]);
 
   return (
     <s-page heading="StorePilot">

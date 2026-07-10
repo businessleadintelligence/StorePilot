@@ -23,7 +23,7 @@ vi.mock("../../services/clarity-integration.server", () => ({
 }));
 
 vi.mock("../../production/production-service", () => ({
-  getProductionHealthBadge: vi.fn(async () => ({
+  getCachedProductionBadge: vi.fn(() => ({
     label: "Healthy",
     level: "healthy",
   })),
