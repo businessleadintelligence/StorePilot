@@ -80,7 +80,7 @@ describe("Command center route", () => {
 
     vi.mocked(getCommandCenterData).mockResolvedValue({
       header: {
-        merchantName: "John",
+        merchantName: "Acme Store",
         greeting: "Good morning",
         storeHealth: 86,
         criticalIssues: 2,
@@ -488,9 +488,9 @@ describe("Command center route", () => {
     expect(getCommandCenterData).toHaveBeenCalledWith({
       storeId: "store-1",
       currency: "USD",
-      merchantName: "John",
+      merchantName: "Acme Store",
     });
-    expect(data.commandCenter?.header.merchantName).toBe("John");
+    expect(data.commandCenter?.header.merchantName).toBe("Acme Store");
   });
 
   it("records recommendation feedback through existing APIs", async () => {

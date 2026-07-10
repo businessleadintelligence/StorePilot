@@ -1,6 +1,7 @@
 import type { OnboardingPhaseStatus, OnboardingStatus } from "@prisma/client";
 
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 
 export type SyncDomainStatus = {
   synced: boolean;
@@ -164,7 +165,7 @@ export async function getStoreSyncStatus(
       },
     }),
     prisma.order.count({
-      where: { storeId },
+      where: orderWhereForMetrics(storeId),
     }),
   ]);
 

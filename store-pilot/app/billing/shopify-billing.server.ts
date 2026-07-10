@@ -3,6 +3,7 @@ import { getStoreSubscription } from "../services/billing.server";
 import { appendBillingAuditEvent } from "./billing-audit";
 import { getCanonicalPlan } from "./billing-limits";
 import type { BillingActionResult, BillingPlanSlug } from "./billing-types";
+import { normalizePlanSlug } from "./plan-registry";
 import { getBillingTrialDays } from "./plan-config";
 import { shopifyGraphqlWithRetry } from "../services/shopify-graphql-retry.server";
 
@@ -226,7 +227,10 @@ export async function syncInternalPlanFromShopify(input: {
   planSlug: BillingPlanSlug;
   status: "active" | "trialing" | "cancelled" | "past_due";
 }): Promise<void> {
-  const plan = await prisma.plan.findUnique({ where: { slug: input.planSlug } });
+  const normalizedSlug = normalizePlanSlug(input.planSlug);
+  const plan =
+    (await prisma.plan.findUnique({ where: { slug: normalizedSlug } })) ??
+    (await prisma.plan.findUnique({ where: { slug: "scale" } }));
   if (!plan) {
     return;
   }
@@ -244,7 +248,7 @@ export async function syncInternalPlanFromShopify(input: {
       currentPeriodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
       trialEndsAt:
         input.status === "trialing"
-          ? new Date(now.getTime() + getBillingTrialDays(input.planSlug) * 86400000)
+          ? new Date(now.getTime() + getBillingTrialDays(normalizedSlug) * 86400000)
           : null,
     },
     update: {

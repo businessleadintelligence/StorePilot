@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import type { TrendFactsSource } from "../ai/facts/trend-facts";
 
 function formatMetricDay(date: Date): string {
@@ -63,12 +64,11 @@ export function createPrismaTrendFactsSource(): TrendFactsSource {
           },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: sixtyDaysAgo },
-          },
+          }),
           select: {
             metricDate: true,
             totalPriceAmount: true,

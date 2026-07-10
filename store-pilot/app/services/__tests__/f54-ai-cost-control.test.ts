@@ -130,7 +130,7 @@ describe("F.5.4 AI Cost Control Engine", () => {
     });
   });
 
-  it("7. applies growth and agency plan budgets", async () => {
+  it("7. applies growth and scale plan budgets", async () => {
     testHarness().dbState.subscriptions.clear();
     await createTrialSubscription(STORE_ID, "growth");
     const growth = await getAiUsageSummary(STORE_ID);
@@ -138,9 +138,9 @@ describe("F.5.4 AI Cost Control Engine", () => {
 
     const harness = testHarness();
     harness.dbState.subscriptions.clear();
-    await createTrialSubscription(STORE_ID, "agency");
-    const agency = await getAiUsageSummary(STORE_ID);
-    expect(agency?.limit).toBe(BILLING_CONFIG.limits.agency.aiExecutions);
+    await createTrialSubscription(STORE_ID, "scale");
+    const scale = await getAiUsageSummary(STORE_ID);
+    expect(scale?.limit).toBe(BILLING_CONFIG.limits.scale.aiExecutions);
   });
 
   it("8. reports blocked AI budget when subscription is missing", async () => {

@@ -1,7 +1,14 @@
 node_modules
 
-# macOS
+# macOS / Windows OS artifacts
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and local diagnostics (never ship)
+*.log
+_typecheck.log
+.rc25-*
 
 /.cache
 /build

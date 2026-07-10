@@ -1,50 +1,48 @@
-import { BILLING_CONFIG, getBillingTrialDays } from "./plan-config";
-import { buildPlanDefinition, listCanonicalPlans } from "./billing-limits";
+import { GLOBAL_TRIAL_DAYS, getPlanEntry, listPublicPlans, type BillingPlanSlug } from "./plan-registry";
+import { buildPlanDefinition } from "./billing-limits";
 import type { BillingPlanSummary, OnboardingBillingSummary } from "./billing-types";
 
-function buildPlanFeatureBullets(slug: keyof typeof BILLING_CONFIG.features): string[] {
-  const limits = BILLING_CONFIG.limits[slug];
-  const features = BILLING_CONFIG.features[slug];
-  const bullets = [
-    `${limits.stores} store${limits.stores === 1 ? "" : "s"}`,
-    `${limits.aiExecutions.toLocaleString()} AI executions/month`,
-    `${limits.automations} automations/month`,
-    `${limits.connectorSyncFrequencyHours}h connector sync`,
+function buildPlanFeatureBullets(slug: BillingPlanSlug): string[] {
+  const plan = getPlanEntry(slug);
+  const bullets: string[] = [
+    `${plan.limits.products === "unlimited" ? "Unlimited" : plan.limits.products.toLocaleString()} products`,
+    `${plan.limits.ai_requests === "unlimited" ? "Unlimited" : plan.limits.ai_requests.toLocaleString()} AI requests/month`,
+    plan.limits.executive_briefings === "unlimited"
+      ? "Unlimited executive briefings"
+      : `${plan.limits.executive_briefings} executive briefings/month`,
+    plan.limits.sync_frequency_hours === "unlimited" || plan.limits.sync_frequency_hours === 1
+      ? "Hourly sync"
+      : "Daily sync",
   ];
 
-  if (features.executiveCOO) {
-    bullets.push("Executive COO access");
-  }
-  if (features.automationCenter) {
-    bullets.push("Automation Center");
-  }
-  if (features.advancedAnalytics) {
-    bullets.push("Advanced analytics");
-  }
+  if (plan.features.prediction_engine) bullets.push("Prediction Engine");
+  if (plan.features.experiment_engine) bullets.push("Experiment Intelligence");
+  if (plan.features.merchant_intelligence) bullets.push("Merchant Intelligence");
+  if (plan.features.api_access) bullets.push("API access");
+  if (plan.features.priority_ai) bullets.push("Priority AI");
 
   return bullets;
 }
 
-export function buildBillingPlanSummary(slug: keyof typeof BILLING_CONFIG.plans): BillingPlanSummary {
+export function buildBillingPlanSummary(slug: BillingPlanSlug): BillingPlanSummary {
   const plan = buildPlanDefinition(slug);
   return {
     slug,
     name: plan.name,
-    priceUsd: BILLING_CONFIG.plans[slug].price,
-    trialDays: getBillingTrialDays(slug),
+    priceUsd: plan.monthlyPriceUsd,
+    trialDays: GLOBAL_TRIAL_DAYS,
     description: plan.description,
     features: buildPlanFeatureBullets(slug),
   };
 }
 
 export function buildOnboardingBillingSummary(): OnboardingBillingSummary {
-  const trialDays = getBillingTrialDays();
   const primaryPlan = buildPlanDefinition("growth");
 
   return {
-    trialDays,
-    trialExplanation: `Every plan includes a ${trialDays}-day free trial. You approve billing in Shopify before any charge is created.`,
-    upgradeMessage: `After your trial, continue with ${primaryPlan.name} at $${BILLING_CONFIG.plans.growth.price}/month for full AI and connector access.`,
-    plans: listCanonicalPlans().map((plan) => buildBillingPlanSummary(plan.slug)),
+    trialDays: GLOBAL_TRIAL_DAYS,
+    trialExplanation: `Every plan includes a ${GLOBAL_TRIAL_DAYS}-day free trial. You approve billing in Shopify before any charge is created.`,
+    upgradeMessage: `After your trial, continue with ${primaryPlan.name} at $${primaryPlan.monthlyPriceUsd}/month for prediction and experiment intelligence.`,
+    plans: listPublicPlans().map((plan) => buildBillingPlanSummary(plan.slug)),
   };
 }

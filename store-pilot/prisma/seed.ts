@@ -1,45 +1,12 @@
+import { buildDbPlanSeedRecords } from "../app/billing/plan-registry";
 import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const PLANS = [
-  {
-    name: "Starter",
-    slug: "starter",
-    monthlyPrice: 49,
-    annualPrice: 490,
-    maxProducts: 1000,
-    maxOrders: 5000,
-    maxTeamMembers: 2,
-    aiCreditsPerMonth: 100,
-    active: true,
-  },
-  {
-    name: "Growth",
-    slug: "growth",
-    monthlyPrice: 99,
-    annualPrice: 990,
-    maxProducts: 10000,
-    maxOrders: 50000,
-    maxTeamMembers: 10,
-    aiCreditsPerMonth: 500,
-    active: true,
-  },
-  {
-    name: "Agency",
-    slug: "agency",
-    monthlyPrice: 199,
-    annualPrice: 1990,
-    maxProducts: 100000,
-    maxOrders: 500000,
-    maxTeamMembers: 50,
-    aiCreditsPerMonth: 2000,
-    active: true,
-  },
-] as const;
-
 async function main() {
-  for (const plan of PLANS) {
+  const plans = buildDbPlanSeedRecords();
+
+  for (const plan of plans) {
     await prisma.plan.upsert({
       where: { slug: plan.slug },
       create: plan,
@@ -53,6 +20,26 @@ async function main() {
         aiCreditsPerMonth: plan.aiCreditsPerMonth,
         active: plan.active,
       },
+    });
+  }
+
+  const scalePlan = await prisma.plan.findUnique({ where: { slug: "scale" } });
+  if (scalePlan) {
+    const legacyPlans = await prisma.plan.findMany({
+      where: { slug: { in: ["pro", "agency"] } },
+      select: { id: true },
+    });
+
+    for (const legacy of legacyPlans) {
+      await prisma.subscription.updateMany({
+        where: { planId: legacy.id },
+        data: { planId: scalePlan.id },
+      });
+    }
+
+    await prisma.plan.updateMany({
+      where: { slug: { in: ["pro", "agency"] } },
+      data: { active: false },
     });
   }
 }

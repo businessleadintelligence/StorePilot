@@ -19,6 +19,10 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
+function productsIdempotencyKey(runId: string): string {
+  return `onboarding:${STORE_ID}:products:${runId}`;
+}
+
 describe("F.3.4 Onboarding State Machine", () => {
   it("1. getOrCreateStoreOnboarding creates initial pending onboarding row", async () => {
     const summary = await getOrCreateStoreOnboarding(STORE_ID);
@@ -37,14 +41,17 @@ describe("F.3.4 Onboarding State Machine", () => {
     const result = await advanceOnboarding({ storeId: STORE_ID });
     const harness = testHarness();
     const onboarding = harness.getOnboarding(STORE_ID);
+    const runId = onboarding?.onboardingRunId ?? "";
     const productsJob = harness.dbState.syncJobsByIdempotency.get(
-      `onboarding:${STORE_ID}:products`,
+      productsIdempotencyKey(runId),
     );
 
     expect(result.action).toBe("enqueued");
     expect(result.phase).toBe("PRODUCTS");
     expect(result.jobId).toBeDefined();
-    expect(onboarding?.productSyncStatus).toBe("running");
+    expect(onboarding?.productSyncStatus).toBe("queued");
+    expect(onboarding?.progressPercent).toBe(0);
+    expect(onboarding?.progressLabel).toBe("Products queued");
     expect(onboarding?.productSyncJobId).toBe(result.jobId);
     expect(onboarding?.currentJobId).toBe(result.jobId);
     expect(onboarding?.status).toBe("running");
@@ -61,12 +68,13 @@ describe("F.3.4 Onboarding State Machine", () => {
     const onboarding = harness.getOnboarding(STORE_ID);
 
     expect(onboarding?.productSyncStatus).toBe("completed");
-    expect(onboarding?.inventorySyncStatus).toBe("running");
+    expect(onboarding?.inventorySyncStatus).toBe("queued");
+    expect(onboarding?.progressPercent).toBe(33);
     expect(onboarding?.inventorySyncJobId).toBe(onboarding?.currentJobId);
     expect(harness.dbState.syncJobs.size).toBe(2);
     expect(
       harness.dbState.syncJobsByIdempotency.has(
-        `onboarding:${STORE_ID}:inventory`,
+        `onboarding:${STORE_ID}:inventory:${onboarding?.onboardingRunId}`,
       ),
     ).toBe(true);
   });
@@ -81,7 +89,8 @@ describe("F.3.4 Onboarding State Machine", () => {
     const onboarding = harness.getOnboarding(STORE_ID);
 
     expect(onboarding?.inventorySyncStatus).toBe("completed");
-    expect(onboarding?.ordersSyncStatus).toBe("running");
+    expect(onboarding?.ordersSyncStatus).toBe("queued");
+    expect(onboarding?.progressPercent).toBe(66);
     expect(onboarding?.ordersSyncJobId).toBe(onboarding?.currentJobId);
     expect(harness.dbState.syncJobs.size).toBe(3);
   });
@@ -163,6 +172,7 @@ describe("F.3.4 Onboarding State Machine", () => {
     expect(result.action).toBe("started");
     expect(result.phase).toBe("PRODUCTS");
     expect(harness.getOnboarding(STORE_ID)?.productSyncStatus).toBe("running");
+    expect(harness.getOnboarding(STORE_ID)?.progressPercent).toBe(0);
     expect(harness.getOnboarding(STORE_ID)?.currentJobId).toBeTruthy();
   });
 });

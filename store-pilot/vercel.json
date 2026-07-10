@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "installCommand": "npm install",
   "crons": [
-    { "path": "/cron/worker", "schedule": "0 1 * * *" },
+    { "path": "/cron/worker", "schedule": "*/2 * * * *" },
     { "path": "/cron/dispatch/cleanup-jobs", "schedule": "0 2 * * *" },
     { "path": "/cron/dispatch/knowledge-refresh", "schedule": "0 3 * * *" },
     { "path": "/cron/dispatch/learning-engine", "schedule": "0 4 * * *" },

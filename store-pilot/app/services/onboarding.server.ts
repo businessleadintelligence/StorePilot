@@ -10,7 +10,12 @@ import {
 } from "@prisma/client";
 
 import prisma from "../db.server";
-import { completeJobWithClient, enqueueJobWithClient, failJobWithClient } from "./job.server";
+import {
+  completeJobWithClient,
+  enqueueJobWithClient,
+  failJobWithClient,
+  isTerminalJobStatus,
+} from "./job.server";
 import { scheduleOrdersIncrementalSync, ensureOrdersSchedulerActive } from "./orders-scheduler.server";
 
 const LOG_PREFIX = "[onboarding]";
@@ -107,6 +112,7 @@ type PhaseConfig = {
     | "ordersSyncCompletedAt";
   progressPercent: number;
   progressLabel: string;
+  queuedProgressLabel: string;
 };
 
 const PHASE_CONFIG: Record<SyncPhase, PhaseConfig> = {
@@ -118,6 +124,7 @@ const PHASE_CONFIG: Record<SyncPhase, PhaseConfig> = {
     completedAtField: "productSyncCompletedAt",
     progressPercent: 33,
     progressLabel: "Syncing products",
+    queuedProgressLabel: "Products queued",
   },
   INVENTORY: {
     jobType: JobType.bootstrap_inventory,
@@ -127,6 +134,7 @@ const PHASE_CONFIG: Record<SyncPhase, PhaseConfig> = {
     completedAtField: "inventorySyncCompletedAt",
     progressPercent: 66,
     progressLabel: "Syncing inventory",
+    queuedProgressLabel: "Inventory queued",
   },
   ORDERS: {
     jobType: JobType.orders_historical,
@@ -136,6 +144,7 @@ const PHASE_CONFIG: Record<SyncPhase, PhaseConfig> = {
     completedAtField: "ordersSyncCompletedAt",
     progressPercent: 90,
     progressLabel: "Syncing orders",
+    queuedProgressLabel: "Orders queued",
   },
 };
 
@@ -215,21 +224,21 @@ function buildResult(
 }
 
 function isPhaseCompleted(
-  onboarding: StoreOnboarding,
+  onboarding: Pick<StoreOnboarding, PhaseConfig["statusField"]>,
   phase: SyncPhase,
 ): boolean {
   return onboarding[PHASE_CONFIG[phase].statusField] === OnboardingPhaseStatus.completed;
 }
 
 function isPhaseBlocked(
-  onboarding: StoreOnboarding,
+  onboarding: Pick<StoreOnboarding, PhaseConfig["statusField"]>,
   phase: SyncPhase,
 ): boolean {
   return onboarding[PHASE_CONFIG[phase].statusField] === OnboardingPhaseStatus.blocked;
 }
 
 function isPhaseDone(
-  onboarding: StoreOnboarding,
+  onboarding: Pick<StoreOnboarding, PhaseConfig["statusField"]>,
   phase: SyncPhase,
 ): boolean {
   return isPhaseCompleted(onboarding, phase) || isPhaseBlocked(onboarding, phase);
@@ -248,6 +257,135 @@ function allPhasesCompleted(onboarding: StoreOnboarding): boolean {
     isPhaseDone(onboarding, "INVENTORY") &&
     isPhaseDone(onboarding, "ORDERS")
   );
+}
+
+export function computeProgressPercentFromPhases(
+  onboarding: Pick<
+    StoreOnboarding,
+    | "productSyncStatus"
+    | "inventorySyncStatus"
+    | "ordersSyncStatus"
+    | "status"
+  >,
+): number {
+  if (onboarding.status === OnboardingStatus.completed) {
+    return 100;
+  }
+
+  let percent = 0;
+
+  if (isPhaseDone(onboarding, "PRODUCTS")) {
+    percent = 33;
+  }
+
+  if (isPhaseDone(onboarding, "INVENTORY")) {
+    percent = 66;
+  }
+
+  if (isPhaseDone(onboarding, "ORDERS")) {
+    percent = 90;
+  }
+
+  return percent;
+}
+
+async function repairTerminalPhaseJob(
+  tx: Prisma.TransactionClient,
+  storeId: string,
+  onboarding: StoreOnboarding,
+  phase: SyncPhase,
+): Promise<StoreOnboarding> {
+  const config = PHASE_CONFIG[phase];
+  const phaseStatus = onboarding[config.statusField];
+  const jobId = onboarding[config.jobIdField];
+
+  if (
+    phaseStatus !== OnboardingPhaseStatus.queued &&
+    phaseStatus !== OnboardingPhaseStatus.running
+  ) {
+    return onboarding;
+  }
+
+  if (!jobId) {
+    return onboarding;
+  }
+
+  const job = await tx.syncJob.findUnique({
+    where: { id: jobId },
+  });
+
+  if (!job || !isTerminalJobStatus(job.status)) {
+    return onboarding;
+  }
+
+  if (job.status === JobStatus.completed) {
+    return markPhaseCompletedWithClient(tx, storeId, phase);
+  }
+
+  if (job.status === JobStatus.cancelled) {
+    return tx.storeOnboarding.update({
+      where: { storeId },
+      data: {
+        onboardingRunId: crypto.randomUUID(),
+        status: OnboardingStatus.running,
+        [config.statusField]: OnboardingPhaseStatus.not_started,
+        [config.jobIdField]: null,
+        currentJobId: null,
+        progressPercent: computeProgressPercentFromPhases(onboarding),
+        progressLabel: null,
+        failedAt: null,
+        lastErrorMessage: null,
+        lastErrorCode: null,
+      },
+    });
+  }
+
+  await markPhaseFailedWithClient(
+    tx,
+    storeId,
+    phase,
+    job.errorMessage ??
+      (job.status === JobStatus.dead_letter
+        ? "job_dead_lettered"
+        : "job_failed"),
+  );
+
+  return tx.storeOnboarding.findUniqueOrThrow({
+    where: { storeId },
+  });
+}
+
+async function repairTerminalPhaseJobs(
+  tx: Prisma.TransactionClient,
+  storeId: string,
+  onboarding: StoreOnboarding,
+): Promise<StoreOnboarding> {
+  let current = onboarding;
+
+  for (const phase of ["PRODUCTS", "INVENTORY", "ORDERS"] as const) {
+    current = await repairTerminalPhaseJob(tx, storeId, current, phase);
+  }
+
+  return current;
+}
+
+async function isPhaseJobActive(
+  tx: Prisma.TransactionClient,
+  onboarding: StoreOnboarding,
+  phase: SyncPhase,
+): Promise<boolean> {
+  const config = PHASE_CONFIG[phase];
+  const jobId = onboarding[config.jobIdField];
+
+  if (!jobId) {
+    return false;
+  }
+
+  const job = await tx.syncJob.findUnique({
+    where: { id: jobId },
+  });
+
+  return Boolean(job && !isTerminalJobStatus(job.status));
 }
 
 const JOB_TYPE_TO_SYNC_PHASE: Partial<Record<JobType, SyncPhase>> = {
@@ -528,7 +666,8 @@ export async function reconcileOnboardingWithCompletedJobs(): Promise<number> {
     }
 
     const config = PHASE_CONFIG[phase];
-    if (row[config.statusField] !== OnboardingPhaseStatus.running) {
+    if (row[config.statusField] !== OnboardingPhaseStatus.running &&
+      row[config.statusField] !== OnboardingPhaseStatus.queued) {
       continue;
     }
 
@@ -583,28 +722,53 @@ async function enqueueAndLinkPhaseJob(
   idempotencyKey: string,
 ): Promise<StoreOnboarding> {
   const config = PHASE_CONFIG[phase];
-  const job = await enqueueJobWithClient(tx, {
+  let currentOnboarding = onboarding;
+  let job = await enqueueJobWithClient(tx, {
     storeId,
     jobType: config.jobType,
     idempotencyKey,
     maxAttempts: ONBOARDING_JOB_MAX_ATTEMPTS,
     priority: JobPriority.critical,
     payload: {
-      onboardingRunId: onboarding.onboardingRunId,
+      onboardingRunId: currentOnboarding.onboardingRunId,
       phase,
     },
   });
+
+  if (isTerminalJobStatus(job.status)) {
+    const newRunId = crypto.randomUUID();
+    currentOnboarding = await tx.storeOnboarding.update({
+      where: { storeId },
+      data: { onboardingRunId: newRunId },
+    });
+
+    job = await enqueueJobWithClient(tx, {
+      storeId,
+      jobType: config.jobType,
+      idempotencyKey: buildIdempotencyKey(
+        storeId,
+        config.idempotencySuffix,
+        newRunId,
+      ),
+      maxAttempts: ONBOARDING_JOB_MAX_ATTEMPTS,
+      priority: JobPriority.critical,
+      payload: {
+        onboardingRunId: currentOnboarding.onboardingRunId,
+        phase,
+      },
+    });
+  }
 
   const link = await tx.storeOnboarding.updateMany({
     where: buildPhaseLinkWhere(storeId, phase),
     data: {
       status: OnboardingStatus.running,
-      startedAt: onboarding.startedAt ?? new Date(),
+      startedAt: currentOnboarding.startedAt ?? new Date(),
       currentJobId: job.id,
       [config.jobIdField]: job.id,
-      [config.statusField]: OnboardingPhaseStatus.running,
-      progressPercent: config.progressPercent,
-      progressLabel: config.progressLabel,
+      [config.statusField]: OnboardingPhaseStatus.queued,
+      progressPercent: computeProgressPercentFromPhases(currentOnboarding),
+      progressLabel: config.queuedProgressLabel,
     },
   });
 
@@ -648,6 +812,8 @@ async function executeAdvanceOnboarding(
   }
 
   let onboarding = initialOnboarding;
+
+  onboarding = await repairTerminalPhaseJobs(tx, storeId, onboarding);
 
   if (onboarding.status === OnboardingStatus.failed) {
     return {
@@ -697,14 +863,18 @@ async function executeAdvanceOnboarding(
   const phaseStatus = onboarding[config.statusField];
 
   if (
-    phaseStatus === OnboardingPhaseStatus.running &&
+    (phaseStatus === OnboardingPhaseStatus.running ||
+      phaseStatus === OnboardingPhaseStatus.queued) &&
     onboarding[config.jobIdField]
   ) {
-    return {
-      phase: null,
-      action: "noop",
-      onboarding,
-    };
+    const active = await isPhaseJobActive(tx, onboarding, phaseToEnqueue);
+    if (active) {
+      return {
+        phase: null,
+        action: "noop",
+        onboarding,
+      };
+    }
   }
 
   onboarding = await enqueueAndLinkPhaseJob(
@@ -712,7 +882,11 @@ async function executeAdvanceOnboarding(
     storeId,
     phaseToEnqueue,
     onboarding,
-    buildIdempotencyKey(storeId, config.idempotencySuffix),
+    buildIdempotencyKey(
+      storeId,
+      config.idempotencySuffix,
+      onboarding.onboardingRunId,
+    ),
   );
 
   return {
@@ -817,7 +991,6 @@ export async function markPhaseStarted(
       startedAt: existing.startedAt ?? now,
       currentJobId: existing.currentJobId,
       [config.statusField]: OnboardingPhaseStatus.running,
-      progressPercent: config.progressPercent,
       progressLabel: config.progressLabel,
     },
   });

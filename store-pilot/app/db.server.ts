@@ -1,16 +1,26 @@
 import { PrismaClient } from "@prisma/client";
 
+import { getPrismaClient } from "../packages/database/client";
+
 declare global {
   // eslint-disable-next-line no-var
-  var prismaGlobal: PrismaClient;
+  var prismaGlobal: PrismaClient | undefined;
 }
+
+const prisma = getPrismaClient() as unknown as PrismaClient;
 
 if (process.env.NODE_ENV !== "production") {
-  if (!global.prismaGlobal) {
-    global.prismaGlobal = new PrismaClient();
-  }
+  global.prismaGlobal = prisma;
 }
 
-const prisma = global.prismaGlobal ?? new PrismaClient();
-
 export default prisma;
+
+export {
+  auditDatabaseUrl,
+  disconnectPrismaClient,
+  getDatabaseMetricsSnapshot,
+  getDatabasePoolRecommendations,
+  runInParallelBatches,
+  withPrismaRetry,
+  withPrismaTransaction,
+} from "../packages/database";

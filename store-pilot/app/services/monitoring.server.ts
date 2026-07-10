@@ -1,10 +1,14 @@
 import { loadAIConfig } from "../ai/core/ai-config";
 import { createDefaultAIPlatform } from "../ai/providers/index";
 import { validateMinimumShopifyScopes } from "../lib/privacy-by-architecture";
-import prisma from "../db.server";
+import prisma, {
+  auditDatabaseUrl,
+  getDatabaseMetricsSnapshot,
+} from "../db.server";
 import { getCronWorkerHealth } from "./cron-worker.server";
 import { getJobQueueMetrics, type JobQueueMetrics } from "./job.server";
 import { getStartupReadiness, type StartupReadiness } from "./startup-readiness.server";
+import { getWorkerInfrastructureHealth } from "./worker-health.server";
 
 export type MonitorStatus = "healthy" | "degraded" | "unhealthy" | "disabled" | "unknown";
 
@@ -108,6 +112,8 @@ export async function checkDatabaseHealth(): Promise<MonitorCheck> {
   try {
     const rows = await prisma.$queryRaw<Array<{ ok: number }>>`SELECT 1 as ok`;
     const latencyMs = Date.now() - startedAt;
+    const metrics = getDatabaseMetricsSnapshot();
+    const poolAudit = auditDatabaseUrl();
 
     return createCheck("database", "healthy", {
       ok: true,
@@ -116,6 +122,13 @@ export async function checkDatabaseHealth(): Promise<MonitorCheck> {
       details: {
         probe: "select_1",
         result: rows[0]?.ok ?? null,
+        metrics,
+        poolAudit: {
+          connectionLimit: poolAudit.connectionLimit,
+          poolTimeoutSeconds: poolAudit.poolTimeoutSeconds,
+          pgbouncer: poolAudit.pgbouncer,
+          warnings: poolAudit.warnings,
+        },
       },
     });
   } catch (error) {
@@ -123,6 +136,9 @@ export async function checkDatabaseHealth(): Promise<MonitorCheck> {
       ok: false,
       latencyMs: Date.now() - startedAt,
       message: error instanceof Error ? error.message : "database_unreachable",
+      details: {
+        metrics: getDatabaseMetricsSnapshot(),
+      },
     });
   }
 }
@@ -264,36 +280,60 @@ export async function checkQueueHealth(): Promise<MonitorCheck> {
 export async function checkWorkerHealth(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<MonitorCheck> {
-  const cron = checkCronHealth(env);
-  let queue: MonitorCheck;
-
   try {
-    queue = await checkQueueHealth();
+    const infrastructure = await getWorkerInfrastructureHealth(env);
+
+    return createCheck("worker", infrastructure.status, {
+      ok: infrastructure.ok,
+      message:
+        infrastructure.alerts.length > 0
+          ? infrastructure.alerts.join(", ")
+          : "Worker infrastructure operational",
+      details: {
+        queue: infrastructure.queue,
+        queueExtended: infrastructure.queueExtended,
+        workers: infrastructure.workers,
+        orphanJobs: infrastructure.orphanJobs,
+        cronFallback: infrastructure.cronFallback,
+        alerts: infrastructure.alerts,
+      },
+    });
   } catch (error) {
-    queue = createCheck("queue", "unhealthy", {
-      ok: false,
-      message: error instanceof Error ? error.message : "queue_metrics_unavailable",
+    const cron = checkCronHealth(env);
+    let queue: MonitorCheck;
+
+    try {
+      queue = await checkQueueHealth();
+    } catch (queueError) {
+      queue = createCheck("queue", "unhealthy", {
+        ok: false,
+        message:
+          queueError instanceof Error
+            ? queueError.message
+            : "queue_metrics_unavailable",
+      });
+    }
+
+    const ok = cron.ok && queue.ok;
+    const status: MonitorStatus =
+      !cron.ok || queue.status === "unhealthy"
+        ? "unhealthy"
+        : queue.status === "degraded"
+          ? "degraded"
+          : "healthy";
+
+    return createCheck("worker", status, {
+      ok,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Worker infrastructure check failed",
+      details: {
+        cron,
+        queue: queue.details ?? {},
+      },
     });
   }
-
-  const ok = cron.ok && queue.ok;
-  const status: MonitorStatus =
-    !cron.ok || queue.status === "unhealthy"
-      ? "unhealthy"
-      : queue.status === "degraded"
-        ? "degraded"
-        : "healthy";
-
-  return createCheck("worker", status, {
-    ok,
-    message: ok
-      ? "Worker queue operational"
-      : "Worker queue requires attention",
-    details: {
-      cron,
-      queue: queue.details ?? {},
-    },
-  });
 }
 
 export async function checkAiHealth(
@@ -416,13 +456,20 @@ function resolveQueueStatus(metrics: JobQueueMetrics): MonitorStatus {
     return "degraded";
   }
 
+  if (metrics.claimed + metrics.running > 50) {
+    return "degraded";
+  }
+
   return "healthy";
 }
 
 function describeQueueHealth(metrics: JobQueueMetrics, status: MonitorStatus): string {
   if (status === "degraded") {
-    return `Queue has ${metrics.deadLetter} dead-letter job(s)`;
+    if (metrics.deadLetter > 0) {
+      return `Queue has ${metrics.deadLetter} dead-letter job(s)`;
+    }
+    return `Queue backlog elevated (${metrics.queued + metrics.retrying} waiting)`;
   }
 
-  return "Job queue operational";
+  return `Queue depth ${metrics.queued + metrics.retrying + metrics.claimed + metrics.running}`;
 }

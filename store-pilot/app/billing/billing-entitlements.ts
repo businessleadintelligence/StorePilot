@@ -7,14 +7,17 @@ import type {
   CommercialSubscriptionStatus,
   BillingTrialStatus,
 } from "./billing-types";
-import { BILLING_CONFIG } from "./plan-config";
 import { getCanonicalPlan } from "./billing-limits";
+import {
+  GLOBAL_TRIAL_DAYS,
+  getFeatureAvailability,
+  isFeatureAvailable,
+  normalizePlanSlug,
+  type FeatureKey,
+} from "./plan-registry";
 
 export function mapDbPlanSlugToCommercial(slug: string | null | undefined): BillingPlanSlug {
-  if (slug === "growth" || slug === "pro" || slug === "agency" || slug === "starter") {
-    return slug;
-  }
-  return "starter";
+  return normalizePlanSlug(slug);
 }
 
 export function resolveCommercialSubscriptionStatus(
@@ -72,7 +75,7 @@ export function buildTrialStatus(
     expired,
     upgradePrompt: expired
       ? "Your trial has ended. Select a plan to continue using StorePilot."
-      : remainingDays <= BILLING_CONFIG.trialDays
+      : remainingDays <= GLOBAL_TRIAL_DAYS
         ? `Your trial ends in ${remainingDays} day${remainingDays === 1 ? "" : "s"}. Upgrade to keep full access.`
         : null,
   };
@@ -98,7 +101,16 @@ export function isCommercialAccessAllowed(status: CommercialSubscriptionStatus):
   return status === "active" || status === "trialing";
 }
 
-export function isFeatureEnabled(
+export function isFeatureEnabled(plan: BillingPlanDefinition, feature: FeatureKey): boolean {
+  return isFeatureAvailable(plan.slug, feature);
+}
+
+export function getPlanFeatureAvailability(planSlug: string, feature: FeatureKey) {
+  return getFeatureAvailability(normalizePlanSlug(planSlug), feature);
+}
+
+/** @deprecated use isFeatureEnabled with FeatureKey */
+export function isLegacyFeatureEnabled(
   plan: BillingPlanDefinition,
   feature: "operations" | "automation" | "advanced_coo" | "agency",
 ): boolean {
@@ -110,7 +122,7 @@ export function isFeatureEnabled(
     case "advanced_coo":
       return plan.executiveCooAccess === "advanced";
     case "agency":
-      return plan.agencyFeatures;
+      return plan.slug === "scale" && plan.multiStoreAnalytics;
     default:
       return false;
   }

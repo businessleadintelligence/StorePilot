@@ -1,5 +1,8 @@
 import prisma from "../db.server";
+import { customerDataExportExpiresAt } from "../lib/privacy-retention";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import { sanitizeLogContext } from "../lib/privacy-by-architecture";
+import { deleteAllStoreDataInTransaction } from "./gdpr-store-deletion.server";
 import {
   claimWebhookEvent,
   finalizeWebhookClaim,
@@ -270,24 +273,7 @@ async function deleteShopDataByDomain(
   const storeId = existing.id;
 
   await prisma.$transaction(async (tx) => {
-    await tx.aiRecommendation.deleteMany({ where: { storeId } });
-    await tx.aiResultCacheEntry.deleteMany({ where: { storeId } });
-    await tx.aiAgentResult.deleteMany({ where: { storeId } });
-    await tx.aiAgentRun.deleteMany({ where: { storeId } });
-    await tx.aiMemoryRecord.deleteMany({ where: { storeId } });
-    await tx.googleIntegration.deleteMany({ where: { storeId } });
-    await tx.microsoftClarityIntegration.deleteMany({ where: { storeId } });
-    await tx.customerDataExport.deleteMany({ where: { storeId } });
-    await tx.storeOnboarding.deleteMany({ where: { storeId } });
-    await tx.jobEvent.deleteMany({ where: { storeId } });
-    await tx.syncJob.deleteMany({ where: { storeId } });
-    await tx.orderLineItem.deleteMany({ where: { storeId } });
-    await tx.order.deleteMany({ where: { storeId } });
-    await tx.product.deleteMany({ where: { storeId } });
-    await tx.webhookEvent.deleteMany({ where: { storeId } });
-    await tx.usageRecord.deleteMany({ where: { storeId } });
-    await tx.subscription.deleteMany({ where: { storeId } });
-    await tx.user.deleteMany({ where: { storeId } });
+    await deleteAllStoreDataInTransaction(tx, storeId);
     await tx.store.delete({ where: { id: storeId } });
   });
 
@@ -305,10 +291,9 @@ export async function gatherCustomerDataExport(input: {
   const orders =
     input.orderGids.length > 0
       ? await prisma.order.findMany({
-          where: {
-            storeId: input.storeId,
+          where: orderWhereForMetrics(input.storeId, {
             shopifyOrderId: { in: input.orderGids },
-          },
+          }),
           select: {
             shopifyOrderId: true,
             orderName: true,
@@ -390,6 +375,7 @@ async function persistCustomerDataExport(input: {
       dataRequestId: input.dataRequestId,
       shopifyWebhookId: input.shopifyWebhookId,
       exportPayload: input.exportPayload as Prisma.InputJsonValue,
+      expiresAt: customerDataExportExpiresAt(),
     },
   });
 
@@ -468,32 +454,12 @@ export async function getCustomerDataExportForStore(
 }
 
 const REDACTED_LINE_ITEM_TITLE = "[redacted]";
-const REDACTED_FINANCIAL_AMOUNT = new Prisma.Decimal(0);
-
-function isFinancialAmountRedacted(
-  value: Prisma.Decimal | string | number,
-): boolean {
-  return new Prisma.Decimal(value).equals(REDACTED_FINANCIAL_AMOUNT);
-}
 
 function isOrderCustomerRedacted(order: {
+  privacyRedacted?: boolean;
   orderName: string;
-  displayFinancialStatus: string | null;
-  subtotalAmount: Prisma.Decimal;
-  totalTaxAmount: Prisma.Decimal;
-  totalDiscountAmount: Prisma.Decimal;
-  totalPriceAmount: Prisma.Decimal;
-  totalRefundedAmount: Prisma.Decimal;
 }): boolean {
-  return (
-    order.orderName === REDACTED_ORDER_NAME &&
-    order.displayFinancialStatus == null &&
-    isFinancialAmountRedacted(order.subtotalAmount) &&
-    isFinancialAmountRedacted(order.totalTaxAmount) &&
-    isFinancialAmountRedacted(order.totalDiscountAmount) &&
-    isFinancialAmountRedacted(order.totalPriceAmount) &&
-    isFinancialAmountRedacted(order.totalRefundedAmount)
-  );
+  return order.privacyRedacted === true || order.orderName === REDACTED_ORDER_NAME;
 }
 
 export async function redactCustomerOrders(input: {
@@ -529,12 +495,7 @@ export async function redactCustomerOrders(input: {
       id: true,
       shopifyOrderId: true,
       orderName: true,
-      displayFinancialStatus: true,
-      subtotalAmount: true,
-      totalTaxAmount: true,
-      totalDiscountAmount: true,
-      totalPriceAmount: true,
-      totalRefundedAmount: true,
+      privacyRedacted: true,
     },
   });
 
@@ -548,13 +509,9 @@ export async function redactCustomerOrders(input: {
       await prisma.order.update({
         where: { id: order.id },
         data: {
+          privacyRedacted: true,
           orderName: REDACTED_ORDER_NAME,
           displayFinancialStatus: null,
-          subtotalAmount: REDACTED_FINANCIAL_AMOUNT,
-          totalTaxAmount: REDACTED_FINANCIAL_AMOUNT,
-          totalDiscountAmount: REDACTED_FINANCIAL_AMOUNT,
-          totalPriceAmount: REDACTED_FINANCIAL_AMOUNT,
-          totalRefundedAmount: REDACTED_FINANCIAL_AMOUNT,
         },
       });
       ordersRedacted += 1;
@@ -564,18 +521,12 @@ export async function redactCustomerOrders(input: {
       where: {
         storeId: input.storeId,
         shopifyOrderId: order.shopifyOrderId,
-        OR: [
-          { title: { not: REDACTED_LINE_ITEM_TITLE } },
-          { sku: { not: null } },
-          { originalUnitPrice: { not: REDACTED_FINANCIAL_AMOUNT } },
-          { discountedUnitPrice: { not: REDACTED_FINANCIAL_AMOUNT } },
-        ],
+        privacyRedacted: false,
       },
       data: {
+        privacyRedacted: true,
         title: REDACTED_LINE_ITEM_TITLE,
         sku: null,
-        originalUnitPrice: REDACTED_FINANCIAL_AMOUNT,
-        discountedUnitPrice: REDACTED_FINANCIAL_AMOUNT,
       },
     });
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loader } from "../app.executive";
+import { loader } from "../app.coo";
 import { authenticate } from "../../shopify.server";
 import { getExecutiveDashboard, mapRecommendationRecord } from "../../services/executive-dashboard.server";
 

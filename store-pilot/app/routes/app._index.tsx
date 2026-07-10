@@ -1,3 +1,4 @@
+import type { JobStatus } from "@prisma/client";
 import type {
   HeadersFunction,
   LoaderFunctionArgs,
@@ -7,10 +8,23 @@ import { useLoaderData } from "react-router";
 import { ExecutiveBriefCard } from "../components/ExecutiveBriefCard";
 import { HealthScoreCard } from "../components/HealthScoreCard";
 import { InsightsCard } from "../components/InsightsCard";
+import { QuickWinsCard } from "../components/QuickWinsCard";
+import { LearningBootstrapCard } from "../components/LearningBootstrapCard";
 import { MetricsOverviewCard } from "../components/MetricsOverviewCard";
-import { OnboardingCard } from "../components/OnboardingCard";
 import { RecommendationsCard } from "../components/RecommendationsCard";
 import { SyncStatusCard } from "../components/SyncStatusCard";
+import {
+  PremiumHero,
+  PremiumSection,
+  PremiumAsideCard,
+} from "../components/dashboard";
+import {
+  IconPulse,
+  IconSync,
+  IconHealth,
+} from "../components/dashboard/DashboardIcons";
+import styles from "../components/dashboard/premium-dashboard.module.css";
+import { formatCurrency, formatMetricNumber } from "../lib/format";
 import prisma from "../db.server";
 import {
   calculateExecutiveBrief,
@@ -20,6 +34,20 @@ import {
   calculateStoreHealthScore,
   serializeHealthScoreForLoader,
 } from "../services/health-score.server";
+import { getLearningBootstrapForUi } from "../services/learning-ui.server";
+import { getQuickWinsForDashboard } from "../services/quick-wins-ui.server";
+import { getExecutiveDashboardForUi } from "../services/executive-ui.server";
+import { ExecutiveDashboardCards } from "../executive/ui";
+import { RootCauseDashboardCards } from "../root-cause/ui";
+import { getRootCauseDashboardForUi } from "../services/root-cause-ui.server";
+import { PredictionDashboardCards } from "../prediction/ui";
+import { getPredictionDashboardForUi } from "../services/prediction-ui.server";
+import { ExperimentDashboardCards } from "../experiments/ui";
+import { getExperimentDashboardForUi } from "../services/experiment-ui.server";
+import { MerchantIntelligenceDashboard } from "../merchant-intelligence/ui";
+import { getMerchantIntelligenceDashboardForUi } from "../services/merchant-intelligence-ui.server";
+import { WorkspaceLaunchCard } from "../intelligence-ui";
+import { WORKSPACE_ROUTES } from "../intelligence-ui/constants";
 import {
   getOnboardingStatus,
   serializeOnboardingForLoader,
@@ -59,6 +87,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       insights: null,
       recommendations: null,
       currency: "USD",
+      learningBootstrap: null,
+      quickWins: null,
+      executiveDashboard: null,
+      rootCause: null,
+      prediction: null,
+      experiments: null,
+      merchantIntelligence: null,
     };
   }
 
@@ -78,6 +113,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       insights: null,
       recommendations: null,
       currency: "USD",
+      learningBootstrap: null,
+      quickWins: null,
+      executiveDashboard: null,
+      rootCause: null,
+      prediction: null,
+      experiments: null,
+      merchantIntelligence: null,
     };
   }
 
@@ -90,6 +132,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const healthScore = calculateStoreHealthScore(metrics);
 
   const serializedOnboarding = serializeOnboardingForLoader(onboarding);
+  const learningBootstrap = await getLearningBootstrapForUi(store.id, {
+    products: serializedOnboarding?.productSyncStatus,
+    inventory: serializedOnboarding?.inventorySyncStatus,
+    orders: serializedOnboarding?.ordersSyncStatus,
+  });
+  const quickWins = await getQuickWinsForDashboard(store.id, store.currency);
+  const executiveDashboard = await getExecutiveDashboardForUi(store.id, store.currency);
+  const rootCause = await getRootCauseDashboardForUi(store.id);
+  const prediction = await getPredictionDashboardForUi(store.id);
+  const experiments = await getExperimentDashboardForUi(store.id);
+  const merchantIntelligence = await getMerchantIntelligenceDashboardForUi(store.id);
 
   return {
     onboarding: serializedOnboarding,
@@ -120,6 +173,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     ),
     currency: store.currency,
+    learningBootstrap,
+    quickWins,
+    executiveDashboard,
+    rootCause,
+    prediction,
+    experiments,
+    merchantIntelligence,
   };
 };
 
@@ -134,253 +194,178 @@ export default function Index() {
     insights,
     recommendations,
     currency,
+    learningBootstrap,
+    quickWins,
+    executiveDashboard,
+    rootCause,
+    prediction,
+    experiments,
+    merchantIntelligence,
   } = useLoaderData<typeof loader>();
 
   return (
     <s-page heading="StorePilot">
-      {showOnboarding && onboarding ? <OnboardingCard onboarding={onboarding} /> : null}
-
-      {syncStatus ? (
-        <SyncStatusCard
-          syncStatus={syncStatus}
-          phaseStatuses={
-            onboarding
-              ? {
-                  products: onboarding.productSyncStatus,
-                  inventory: onboarding.inventorySyncStatus,
-                  orders: onboarding.ordersSyncStatus,
-                }
-              : undefined
+      <div className={styles.shell}>
+        <PremiumHero
+          healthScore={healthScore?.score ?? null}
+          revenueLabel={
+            metrics ? formatCurrency(metrics.grossRevenue, currency) : null
           }
+          ordersLabel={metrics ? formatMetricNumber(metrics.orders) : null}
+          showOnboarding={showOnboarding}
         />
-      ) : null}
 
-      {metrics ? <MetricsOverviewCard metrics={metrics} currency={currency} /> : null}
+        <PremiumSection
+          title="Intelligence Workspaces"
+          subtitle="Jump into specialized command centers for every domain"
+          icon={<IconPulse size={20} />}
+        >
+          <div className={styles.workspaceGrid}>
+            <WorkspaceLaunchCard
+              title="Executive"
+              description="Briefing, operating plan, decision queue, and readiness."
+              href={WORKSPACE_ROUTES.executive}
+            />
+            <WorkspaceLaunchCard
+              title="Inventory"
+              description="Stock risks, root causes, predictions, and experiments."
+              href={WORKSPACE_ROUTES.inventory}
+            />
+            <WorkspaceLaunchCard
+              title="Pricing"
+              description="Margin risks, elasticity signals, and pricing experiments."
+              href={WORKSPACE_ROUTES.pricing}
+            />
+            <WorkspaceLaunchCard
+              title="Knowledge Graph"
+              description="Explore product, vendor, and revenue relationships."
+              href={WORKSPACE_ROUTES.knowledgeGraph}
+            />
+            <WorkspaceLaunchCard
+              title="Business Memory"
+              description="Patterns, seasonality, DNA versions, and learning."
+              href={WORKSPACE_ROUTES.businessMemory}
+            />
+            <WorkspaceLaunchCard
+              title="Timeline"
+              description="Unified chronological intelligence across your store."
+              href={WORKSPACE_ROUTES.timeline}
+            />
+          </div>
+        </PremiumSection>
 
-      {healthScore ? <HealthScoreCard healthScore={healthScore} /> : null}
+        {showOnboarding && learningBootstrap ? (
+          <LearningBootstrapCard learning={learningBootstrap} />
+        ) : null}
 
-      {executiveBrief ? <ExecutiveBriefCard brief={executiveBrief} /> : null}
+        {quickWins ? <QuickWinsCard quickWins={quickWins} currency={currency} /> : null}
 
-      {insights ? <InsightsCard insights={insights} /> : null}
+        {executiveDashboard ? (
+          <ExecutiveDashboardCards executive={executiveDashboard} />
+        ) : null}
 
-      {recommendations ? <RecommendationsCard recommendations={recommendations} /> : null}
+        {rootCause ? (
+          <RootCauseDashboardCards rootCause={rootCause} currency={currency} />
+        ) : null}
 
-      <s-section heading="AI COO Status">
-        <s-query-container>
-          <s-grid
-            gridTemplateColumns="@container (inline-size > 900px) repeat(5, 1fr), @container (inline-size > 500px) repeat(2, 1fr), 1fr"
-            gap="base"
+        {prediction ? (
+          <PredictionDashboardCards prediction={prediction} currency={currency} />
+        ) : null}
+
+        {experiments ? (
+          <ExperimentDashboardCards experiments={experiments} currency={currency} />
+        ) : null}
+
+        {merchantIntelligence ? (
+          <MerchantIntelligenceDashboard intelligence={merchantIntelligence} />
+        ) : null}
+
+        {syncStatus ? (
+          <SyncStatusCard
+            syncStatus={syncStatus}
+            phaseStatuses={
+              onboarding
+                ? {
+                    products: onboarding.productSyncStatus,
+                    inventory: onboarding.inventorySyncStatus,
+                    orders: onboarding.ordersSyncStatus,
+                  }
+                : undefined
+            }
+            currentJobStatus={
+              (onboarding?.currentJobStatus as JobStatus | null | undefined) ??
+              null
+            }
+            setupProgressPercent={onboarding?.progressPercent}
+          />
+        ) : null}
+
+        {metrics ? <MetricsOverviewCard metrics={metrics} currency={currency} /> : null}
+
+        {healthScore ? <HealthScoreCard healthScore={healthScore} /> : null}
+
+        {executiveBrief ? <ExecutiveBriefCard brief={executiveBrief} /> : null}
+
+        {insights ? <InsightsCard insights={insights} /> : null}
+
+        {recommendations ? <RecommendationsCard recommendations={recommendations} /> : null}
+      </div>
+
+      <s-section slot="aside">
+        <div className={styles.asideStack}>
+          <PremiumAsideCard
+            title="Platform Status"
+            icon={<IconPulse size={18} />}
+            badge={<s-badge tone="success">Online</s-badge>}
           >
-            <s-grid-item>
-              <s-box
-                padding="base"
-                background="base"
-                borderWidth="small"
-                borderColor="base"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-text color="subdued">Store Health Score</s-text>
-                  <s-heading>{showOnboarding ? "—" : "N/A"}</s-heading>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
+            <p className={styles.sectionSubtitle}>
+              Operational intelligence platform — all systems operational.
+            </p>
+          </PremiumAsideCard>
 
-            <s-grid-item>
-              <s-box
-                padding="base"
-                background="base"
-                borderWidth="small"
-                borderColor="base"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-text color="subdued">Revenue At Risk</s-text>
-                  <s-heading>{showOnboarding ? "—" : "N/A"}</s-heading>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
+          <PremiumAsideCard
+            title="Shopify Connected"
+            icon={<IconSync size={18} />}
+            badge={<s-badge tone="success">Connected</s-badge>}
+          >
+            <p className={styles.sectionSubtitle}>
+              Your Shopify store is linked and ready for analysis.
+            </p>
+          </PremiumAsideCard>
 
-            <s-grid-item>
-              <s-box
-                padding="base"
-                background="base"
-                borderWidth="small"
-                borderColor="base"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-text color="subdued">Revenue Opportunity</s-text>
-                  <s-heading>{showOnboarding ? "—" : "N/A"}</s-heading>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
-
-            <s-grid-item>
-              <s-box
-                padding="base"
-                background="base"
-                borderWidth="small"
-                borderColor="base"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-text color="subdued">Critical Issues</s-text>
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    <s-heading>0</s-heading>
-                    <s-badge tone="critical">Critical</s-badge>
-                  </s-stack>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
-
-            <s-grid-item>
-              <s-box
-                padding="base"
-                background="base"
-                borderWidth="small"
-                borderColor="base"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-text color="subdued">Warning Issues</s-text>
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    <s-heading>0</s-heading>
-                    <s-badge tone="warning">Warning</s-badge>
-                  </s-stack>
-                </s-stack>
-              </s-box>
-            </s-grid-item>
-          </s-grid>
-        </s-query-container>
+          {showOnboarding && onboarding ? (
+            <PremiumAsideCard
+              title="Setup Status"
+              icon={<IconHealth size={18} />}
+              badge={<s-badge tone="info">In progress</s-badge>}
+            >
+              <p className={styles.sectionSubtitle}>
+                {onboarding.progressLabel ?? "Store setup is running in the background."}
+              </p>
+              <div className={styles.progressTrack} style={{ marginTop: 12 }}>
+                <div
+                  className={styles.progressFill}
+                  style={{ width: `${onboarding.progressPercent ?? 0}%` }}
+                />
+              </div>
+              <p className={styles.metricTrend} style={{ marginTop: 8 }}>
+                {onboarding.progressPercent}% complete
+              </p>
+            </PremiumAsideCard>
+          ) : (
+            <PremiumAsideCard
+              title="Dashboard"
+              icon={<IconHealth size={18} />}
+              badge={<s-badge tone="success">Ready</s-badge>}
+            >
+              <p className={styles.sectionSubtitle}>
+                Your dashboard is live. Metrics and briefings populate as StorePilot
+                analyzes your store.
+              </p>
+            </PremiumAsideCard>
+          )}
+        </div>
       </s-section>
-
-      <s-section heading="Today's Executive Brief">
-        <s-box
-          padding="base"
-          background="subdued"
-          borderWidth="small"
-          borderColor="base"
-          borderRadius="base"
-        >
-          <s-stack gap="base">
-            <s-stack direction="inline" gap="small-200" alignItems="center">
-              <s-badge>Executive Brief</s-badge>
-              <s-text color="subdued">Daily summary</s-text>
-            </s-stack>
-            <s-paragraph>
-              {showOnboarding
-                ? "Your executive brief will appear here after StorePilot finishes syncing your store."
-                : "Your executive brief will appear here after StorePilot completes its first analysis cycle."}
-            </s-paragraph>
-            <s-paragraph color="subdued">
-              This section will surface key performance highlights, operational
-              risks, and recommended focus areas for the day.
-            </s-paragraph>
-          </s-stack>
-        </s-box>
-      </s-section>
-
-      <s-section heading="Priority Issues">
-        <s-box
-          padding="base"
-          background="base"
-          borderWidth="small"
-          borderColor="base"
-          borderRadius="base"
-        >
-          <s-stack gap="base">
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-              <s-text type="strong">Active priority issues</s-text>
-              <s-link href="/app/issues">View all issues</s-link>
-            </s-stack>
-            <s-box padding="large-100" background="subdued" borderRadius="base">
-              <s-stack gap="small-200">
-                <s-text type="strong">No priority issues</s-text>
-                <s-paragraph color="subdued">
-                  {showOnboarding
-                    ? "Issue detection starts after your initial store sync completes."
-                    : "Critical and high-priority store issues will be listed here when detected."}
-                </s-paragraph>
-              </s-stack>
-            </s-box>
-          </s-stack>
-        </s-box>
-      </s-section>
-
-      <s-section heading="Revenue Opportunities">
-        <s-box
-          padding="base"
-          background="base"
-          borderWidth="small"
-          borderColor="base"
-          borderRadius="base"
-        >
-          <s-stack gap="base">
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-              <s-text type="strong">Identified opportunities</s-text>
-              <s-link href="/app/recommendations">View recommendations</s-link>
-            </s-stack>
-            <s-box padding="large-100" background="subdued" borderRadius="base">
-              <s-stack gap="small-200">
-                <s-text type="strong">No opportunities yet</s-text>
-                <s-paragraph color="subdued">
-                  {showOnboarding
-                    ? "Recommendations will appear here after StorePilot finishes syncing your store."
-                    : "Revenue opportunities will appear here after StorePilot analyzes your store data."}
-                </s-paragraph>
-              </s-stack>
-            </s-box>
-          </s-stack>
-        </s-box>
-      </s-section>
-
-      <s-section slot="aside" heading="Platform Status">
-        <s-stack gap="base">
-          <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-            <s-text>StorePilot</s-text>
-            <s-badge tone="success">Online</s-badge>
-          </s-stack>
-          <s-paragraph color="subdued">
-            Operational intelligence platform
-          </s-paragraph>
-        </s-stack>
-      </s-section>
-
-      <s-section slot="aside" heading="Shopify Connected">
-        <s-stack gap="base">
-          <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-            <s-text>Store connection</s-text>
-            <s-badge tone="success">Connected</s-badge>
-          </s-stack>
-          <s-paragraph color="subdued">
-            Your Shopify store is linked and ready for analysis.
-          </s-paragraph>
-        </s-stack>
-      </s-section>
-
-      {showOnboarding && onboarding ? (
-        <s-section slot="aside" heading="Setup Status">
-          <s-stack gap="base">
-            <s-badge tone="info">In progress</s-badge>
-            <s-paragraph color="subdued">
-              {onboarding.progressLabel ?? "Store setup is running in the background."}
-            </s-paragraph>
-            <s-text color="subdued">{onboarding.progressPercent}% complete</s-text>
-          </s-stack>
-        </s-section>
-      ) : (
-        <s-section slot="aside" heading="Dashboard">
-          <s-stack gap="base">
-            <s-badge tone="success">Ready</s-badge>
-            <s-paragraph color="subdued">
-              Your dashboard is ready. Metrics and briefings will populate as
-              StorePilot analyzes your store.
-            </s-paragraph>
-          </s-stack>
-        </s-section>
-      )}
-
     </s-page>
   );
 }

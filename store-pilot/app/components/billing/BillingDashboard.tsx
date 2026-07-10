@@ -61,7 +61,20 @@ export function BillingDashboard({ dashboard }: BillingDashboardProps) {
 
       <s-section heading="Usage Overview">
         <s-grid gridTemplateColumns="@container (inline-size > 700px) repeat(3, 1fr), 1fr" gap="base">
-          <UsageBar label="AI executions" used={dashboard.usage.aiExecutions} limit={dashboard.limits.aiExecutionsPerMonth} />
+          <UsageBar label="AI requests" used={dashboard.usage.aiExecutions} limit={dashboard.limits.aiExecutionsPerMonth} />
+          <UsageBar label="Products" used={dashboard.usage.products} limit={dashboard.limits.maxProducts} />
+          <UsageBar
+            label="Executive briefings"
+            used={dashboard.usage.executiveBriefings}
+            limit={dashboard.limits.executiveBriefingsPerMonth}
+          />
+          <UsageBar label="Predictions" used={dashboard.usage.predictions} limit={dashboard.limits.predictionsPerMonth} />
+          <UsageBar label="Experiments" used={dashboard.usage.experiments} limit={dashboard.limits.experimentsPerMonth} />
+          <UsageBar
+            label="Knowledge graph nodes"
+            used={dashboard.usage.knowledgeGraphNodes}
+            limit={dashboard.limits.knowledgeGraphNodesLimit}
+          />
           <UsageBar
             label="Automation executions"
             used={dashboard.usage.automationExecutions}
@@ -72,18 +85,19 @@ export function BillingDashboard({ dashboard }: BillingDashboardProps) {
             used={dashboard.usage.connectorSyncs}
             limit={dashboard.limits.connectorSyncsPerMonth}
           />
-          <UsageBar
-            label="Operations"
-            used={dashboard.usage.operationsCreated}
-            limit={dashboard.limits.operationsPerMonth}
-          />
+          <UsageBar label="Reports" used={dashboard.usage.reports} limit={dashboard.limits.reportsPerMonth} />
           <UsageBar label="API requests" used={dashboard.usage.apiRequests} limit={dashboard.limits.apiRequestsPerMonth} />
           <UsageBar
             label="Background jobs"
             used={dashboard.usage.backgroundJobs}
             limit={dashboard.limits.backgroundJobsPerMonth}
           />
+          <UsageBar label="Storage (MB)" used={dashboard.usage.storageMb} limit={dashboard.limits.storageMbLimit} />
         </s-grid>
+      </s-section>
+
+      <s-section heading="Worker Queue">
+        <s-text color="subdued">Queue tier: {dashboard.workerQueueTier}</s-text>
       </s-section>
 
       <s-section heading="System Limits">

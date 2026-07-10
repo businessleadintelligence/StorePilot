@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToString } from "react-dom/server";
 
 import { ExecutiveChart } from "../../components/executive/ExecutiveChart";
-import { loader } from "../app.executive";
+import { loader } from "../app.coo";
 import { authenticate } from "../../shopify.server";
 import { getExecutiveDashboard } from "../../services/executive-dashboard.server";
 

@@ -98,14 +98,14 @@ export function resolveMerchantDisplayName(input: {
   firstName?: string | null;
   lastName?: string | null;
   shopName?: string | null;
+  shop?: string | null;
 }): string {
-  const fullName = [input.firstName, input.lastName].filter(Boolean).join(" ").trim();
-  if (fullName) {
-    return fullName.split(" ")[0] ?? fullName;
-  }
-
   if (input.shopName) {
     return input.shopName;
+  }
+
+  if (input.shop) {
+    return input.shop.replace(/\.myshopify\.com$/i, "").replace(/[-_]/g, " ") || "there";
   }
 
   return "there";

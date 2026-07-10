@@ -1,5 +1,5 @@
-import type { BillingDashboardData, BillingPlanSlug } from "./billing-types";
-import { BILLING_PLAN_SLUGS } from "./billing-types";
+import { PUBLIC_PLAN_SLUGS, normalizePlanSlug, type BillingPlanSlug } from "./plan-registry";
+import type { BillingDashboardData } from "./billing-types";
 
 const PII_PATTERNS = [
   /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
@@ -8,8 +8,10 @@ const PII_PATTERNS = [
   /shopifySubscription/i,
 ];
 
+export const BILLING_PLAN_SLUGS = PUBLIC_PLAN_SLUGS;
+
 export function validateBillingPlanSlug(slug: string): slug is BillingPlanSlug {
-  return (BILLING_PLAN_SLUGS as readonly string[]).includes(slug);
+  return normalizePlanSlug(slug) === slug && PUBLIC_PLAN_SLUGS.includes(slug as BillingPlanSlug);
 }
 
 export function validateBillingDashboard(dashboard: BillingDashboardData): {

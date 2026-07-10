@@ -1,5 +1,8 @@
 import type { StoreRecommendationsResult } from "../types/store-dashboard";
 import { getRecommendationBadgeTone } from "../lib/display";
+import { PremiumSection } from "./dashboard/PremiumSection";
+import { IconSpark } from "./dashboard/DashboardIcons";
+import styles from "./dashboard/premium-dashboard.module.css";
 
 type RecommendationsCardProps = {
   recommendations: StoreRecommendationsResult;
@@ -7,44 +10,38 @@ type RecommendationsCardProps = {
 
 export function RecommendationsCard({ recommendations }: RecommendationsCardProps) {
   return (
-    <s-section heading="Recommendations">
-      <s-box
-        padding="base"
-        background="base"
-        borderWidth="small"
-        borderColor="base"
-        borderRadius="base"
-      >
-        {recommendations.recommendations.length > 0 ? (
-          <s-stack gap="base">
-            {recommendations.recommendations.map((item) => (
-              <s-box
-                key={item.id}
-                padding="base"
-                background="subdued"
-                borderRadius="base"
-              >
-                <s-stack gap="small-200">
-                  <s-stack direction="inline" gap="small-200" alignItems="center">
-                    <s-badge tone={getRecommendationBadgeTone(item.severity)}>
-                      {item.severity}
-                    </s-badge>
-                    <s-text type="strong">{item.title}</s-text>
-                  </s-stack>
-                  <s-paragraph>{item.description}</s-paragraph>
-                </s-stack>
-              </s-box>
-            ))}
-          </s-stack>
-        ) : (
-          <s-stack gap="small-200">
-            <s-text type="strong">No issues detected.</s-text>
-            <s-paragraph color="subdued">
-              Store operations look healthy.
-            </s-paragraph>
-          </s-stack>
-        )}
-      </s-box>
-    </s-section>
+    <PremiumSection
+      title="Recommendations"
+      subtitle="Prioritized actions to improve store performance"
+      icon={<IconSpark size={20} />}
+      href="/app/recommendations"
+      linkLabel="View all"
+    >
+      {recommendations.recommendations.length > 0 ? (
+        <div className={styles.recommendationList}>
+          {recommendations.recommendations.map((item) => (
+            <article key={item.id} className={styles.recommendationItem}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <s-badge tone={getRecommendationBadgeTone(item.severity)}>
+                  {item.severity}
+                </s-badge>
+                <strong>{item.title}</strong>
+              </div>
+              <p className={styles.sectionSubtitle} style={{ margin: 0 }}>
+                {item.description}
+              </p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div className={styles.emptyState}>
+          <span className={styles.emptyIcon}>
+            <IconSpark size={32} />
+          </span>
+          <strong>No issues detected</strong>
+          <p className={styles.sectionSubtitle}>Store operations look healthy.</p>
+        </div>
+      )}
+    </PremiumSection>
   );
 }

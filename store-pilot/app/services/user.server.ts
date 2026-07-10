@@ -1,6 +1,7 @@
 import type { Session } from "@shopify/shopify-api";
 
 import prisma from "../db.server";
+import { deriveMerchantAliasFromShop } from "../lib/merchant-identity.server";
 import type { StoreSyncAdminClient } from "./store.server";
 
 const OWNER_EMAIL_QUERY = `#graphql
@@ -87,14 +88,8 @@ function resolveOwnerEmail(
   return null;
 }
 
-function resolveOwnerName(session: Session): string | null {
-  const sessionIdentity = getSessionIdentity(session);
-  const name = [sessionIdentity.firstName, sessionIdentity.lastName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  return name ? name.slice(0, 255) : null;
+function resolveOwnerName(session: Session): string {
+  return deriveMerchantAliasFromShop(session.shop);
 }
 
 async function fetchShopEmailFields(

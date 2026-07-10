@@ -1,24 +1,19 @@
-import type { SubscriptionStatus, UsageMetric } from "@prisma/client";
+import type { UsageMetric } from "@prisma/client";
 
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import {
-  STARTER_PLAN_SLUG,
   getCurrentMonthUsage,
   getCurrentUsageMonth,
-  getStoreSubscription,
   recordUsage,
   tryIncrementAiCreditsWithinLimit,
-  type StorePlanView,
 } from "./billing.server";
 import { getSubscriptionAccessState } from "./subscription.server";
-import type { AiCostControlErrorCode } from "./ai-cost-control.server";
-
-export type EntitlementErrorCode =
-  | "limit_exceeded"
-  | "subscription_missing"
-  | "subscription_inactive"
-  | "plan_missing"
-  | "usage_missing";
+import type { EntitlementErrorCode, AiCostControlErrorCode } from "./access-control-types.server";
+import { getStoreEntitlements, resolveStorePlan } from "./store-entitlements-loader.server";
+export type { EntitlementErrorCode } from "./access-control-types.server";
+export type { StoreEntitlements } from "./store-entitlements-loader.server";
+export { getStoreEntitlements, resolveStorePlan } from "./store-entitlements-loader.server";
 
 export type UsageLimitCheck = {
   allowed: boolean;
@@ -26,20 +21,6 @@ export type UsageLimitCheck = {
   limit: number;
   used: number;
   reason: EntitlementErrorCode | null;
-};
-
-export type StoreEntitlements = {
-  storeId: string;
-  planSlug: string;
-  planName: string;
-  subscriptionStatus: SubscriptionStatus | null;
-  limits: {
-    products: number;
-    orders: number;
-    aiCreditsPerMonth: number;
-    maxTeamMembers: number;
-  };
-  fallbackReason: EntitlementErrorCode | null;
 };
 
 export type UsageSummary = {
@@ -120,32 +101,6 @@ function buildLimitCheck(input: {
   };
 }
 
-function toPlanView(plan: {
-  id: string;
-  name: string;
-  slug: string;
-  monthlyPrice: unknown;
-  annualPrice: unknown;
-  maxProducts: number;
-  maxOrders: number;
-  maxTeamMembers: number;
-  aiCreditsPerMonth: number;
-  active: boolean;
-}): StorePlanView {
-  return {
-    id: plan.id,
-    name: plan.name,
-    slug: plan.slug,
-    monthlyPrice: Number(plan.monthlyPrice),
-    annualPrice: Number(plan.annualPrice),
-    maxProducts: plan.maxProducts,
-    maxOrders: plan.maxOrders,
-    maxTeamMembers: plan.maxTeamMembers,
-    aiCreditsPerMonth: plan.aiCreditsPerMonth,
-    active: plan.active,
-  };
-}
-
 function buildSubscriptionInactiveCheck(limit = 0): UsageLimitCheck {
   return {
     allowed: false,
@@ -182,48 +137,6 @@ async function resolveSubscriptionAccessBlock(
   return buildSubscriptionInactiveCheck();
 }
 
-async function resolveStorePlan(storeId: string): Promise<{
-  plan: StorePlanView | null;
-  subscriptionStatus: SubscriptionStatus | null;
-  fallbackReason: EntitlementErrorCode | null;
-}> {
-  const subscription = await getStoreSubscription(storeId);
-
-  if (subscription?.plan) {
-    return {
-      plan: subscription.plan,
-      subscriptionStatus: subscription.status,
-      fallbackReason: null,
-    };
-  }
-
-  try {
-    const starterPlan = await prisma.plan.findUnique({
-      where: { slug: STARTER_PLAN_SLUG },
-    });
-
-    if (!starterPlan) {
-      return {
-        plan: null,
-        subscriptionStatus: null,
-        fallbackReason: "plan_missing",
-      };
-    }
-
-    return {
-      plan: toPlanView(starterPlan),
-      subscriptionStatus: null,
-      fallbackReason: "subscription_missing",
-    };
-  } catch {
-    return {
-      plan: null,
-      subscriptionStatus: null,
-      fallbackReason: "plan_missing",
-    };
-  }
-}
-
 async function getProductCount(storeId: string): Promise<number | null> {
   try {
     return await prisma.product.count({
@@ -237,7 +150,7 @@ async function getProductCount(storeId: string): Promise<number | null> {
 async function getOrderCount(storeId: string): Promise<number | null> {
   try {
     return await prisma.order.count({
-      where: { storeId },
+      where: orderWhereForMetrics(storeId),
     });
   } catch {
     return null;
@@ -324,46 +237,6 @@ function buildPlanMissingCheck(): UsageLimitCheck {
     limit: 0,
     used: 0,
     reason: "plan_missing",
-  };
-}
-
-export async function getStoreEntitlements(
-  storeId: string,
-): Promise<StoreEntitlements | null> {
-  if (!storeId) {
-    return null;
-  }
-
-  const resolved = await resolveStorePlan(storeId);
-
-  if (!resolved.plan) {
-    return {
-      storeId,
-      planSlug: STARTER_PLAN_SLUG,
-      planName: "Starter",
-      subscriptionStatus: null,
-      limits: {
-        products: 0,
-        orders: 0,
-        aiCreditsPerMonth: 0,
-        maxTeamMembers: 0,
-      },
-      fallbackReason: resolved.fallbackReason ?? "plan_missing",
-    };
-  }
-
-  return {
-    storeId,
-    planSlug: resolved.plan.slug,
-    planName: resolved.plan.name,
-    subscriptionStatus: resolved.subscriptionStatus,
-    limits: {
-      products: resolved.plan.maxProducts,
-      orders: resolved.plan.maxOrders,
-      aiCreditsPerMonth: resolved.plan.aiCreditsPerMonth,
-      maxTeamMembers: resolved.plan.maxTeamMembers,
-    },
-    fallbackReason: resolved.fallbackReason,
   };
 }
 

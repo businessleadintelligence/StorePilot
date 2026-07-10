@@ -17,6 +17,17 @@ export const DEFAULT_LOCK_DURATION_MS = 5 * 60 * 1000;
 export const STALE_HEARTBEAT_GRACE_MULTIPLIER = 2;
 const DEFAULT_RETRY_DELAY_MS = 30_000;
 const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
+const DEFAULT_RETRY_JITTER_MS = 5_000;
+
+export function resolveLockDurationMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number(env.JOB_LOCK_DURATION_MS);
+  if (!Number.isFinite(raw) || raw < 60_000) {
+    return DEFAULT_LOCK_DURATION_MS;
+  }
+  return Math.min(30 * 60 * 1000, Math.floor(raw));
+}
 
 type LogLevel = "info" | "warn" | "error";
 
@@ -39,6 +50,14 @@ type JobLogContext = {
   reason?: string;
   duplicate?: boolean;
 };
+
+export function isTerminalJobStatus(status: JobStatus): boolean {
+  return (
+    status === JobStatus.completed ||
+    status === JobStatus.cancelled ||
+    status === JobStatus.dead_letter
+  );
+}
 
 export class JobWorkerOwnershipError extends Error {
   readonly jobId: string;
@@ -184,11 +203,12 @@ function isUniqueConstraintError(error: unknown): boolean {
   );
 }
 
-function computeRetryAvailableAt(attempts: number, retryDelayMs?: number): Date {
+export function computeRetryAvailableAt(attempts: number, retryDelayMs?: number): Date {
   const baseDelayMs = retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const exponentialDelayMs = baseDelayMs * 2 ** Math.max(attempts - 1, 0);
-  const delayMs = Math.min(exponentialDelayMs, MAX_RETRY_DELAY_MS);
-  return new Date(Date.now() + delayMs);
+  const cappedDelayMs = Math.min(exponentialDelayMs, MAX_RETRY_DELAY_MS);
+  const jitterMs = Math.floor(Math.random() * DEFAULT_RETRY_JITTER_MS);
+  return new Date(Date.now() + cappedDelayMs + jitterMs);
 }
 
 function buildProgressJson(input: {
@@ -288,13 +308,20 @@ export function computeHeartbeatStaleCutoff(
   );
 }
 
-/** True when a running job's lock expired and heartbeat is too old to trust. */
+/** True when a locked job's visibility timeout expired and heartbeat is too old to trust. */
 export function isJobEligibleForStaleRelease(
   job: Pick<SyncJob, "status" | "lockExpiresAt" | "heartbeatAt">,
   lockDurationMs: number = DEFAULT_LOCK_DURATION_MS,
   referenceDate: Date = new Date(),
 ): boolean {
-  if (job.status !== JobStatus.running || !job.lockExpiresAt) {
+  if (
+    job.status !== JobStatus.running &&
+    job.status !== JobStatus.claimed
+  ) {
+    return false;
+  }
+
+  if (!job.lockExpiresAt) {
     return false;
   }
 
@@ -359,10 +386,12 @@ export async function enqueueJobWithClient(
   }
 }
 
-export async function findExpiredRunningJobs(): Promise<SyncJob[]> {
+export async function findExpiredLockedJobs(): Promise<SyncJob[]> {
   return prisma.syncJob.findMany({
     where: {
-      status: JobStatus.running,
+      status: {
+        in: [JobStatus.running, JobStatus.claimed],
+      },
       lockExpiresAt: {
         lt: new Date(),
       },
@@ -373,10 +402,15 @@ export async function findExpiredRunningJobs(): Promise<SyncJob[]> {
   });
 }
 
+/** @deprecated Use findExpiredLockedJobs */
+export async function findExpiredRunningJobs(): Promise<SyncJob[]> {
+  return findExpiredLockedJobs();
+}
+
 export async function releaseStaleJobs(
-  lockDurationMs: number = DEFAULT_LOCK_DURATION_MS,
+  lockDurationMs: number = resolveLockDurationMs(),
 ): Promise<SyncJob[]> {
-  const staleJobs = await findExpiredRunningJobs();
+  const staleJobs = await findExpiredLockedJobs();
   const releasedJobs: SyncJob[] = [];
   const now = new Date();
 
@@ -391,10 +425,12 @@ export async function releaseStaleJobs(
       }
 
       const availableAt = new Date();
+      const requeueStatus =
+        current.attempts > 0 ? JobStatus.retrying : JobStatus.queued;
       const updated = await tx.syncJob.update({
         where: { id: current.id },
         data: {
-          status: JobStatus.queued,
+          status: requeueStatus,
           lockedAt: null,
           lockedBy: null,
           lockExpiresAt: null,
@@ -410,8 +446,8 @@ export async function releaseStaleJobs(
         storeId: updated.storeId,
         jobId: updated.id,
         eventType: JobEventType.retried,
-        fromStatus: JobStatus.running,
-        toStatus: JobStatus.queued,
+        fromStatus: current.status,
+        toStatus: requeueStatus,
         attemptNumber: updated.attempts,
         message: "Stale lock released",
         metadataJson: {
@@ -494,7 +530,7 @@ export async function enqueueJob(input: EnqueueJobInput): Promise<SyncJob> {
 export async function claimNextJob(
   input: ClaimNextJobInput,
 ): Promise<JobClaimResult | null> {
-  const lockDurationMs = input.lockDurationMs ?? DEFAULT_LOCK_DURATION_MS;
+  const lockDurationMs = input.lockDurationMs ?? resolveLockDurationMs();
   const claimedAt = new Date();
   const lockExpiresAt = new Date(claimedAt.getTime() + lockDurationMs);
 
@@ -502,7 +538,7 @@ export async function claimNextJob(
     WITH next_job AS (
       SELECT id
       FROM sync_jobs
-      WHERE status = 'queued'::"JobStatus"
+      WHERE status IN ('queued'::"JobStatus", 'retrying'::"JobStatus")
         AND "availableAt" <= NOW()
       ORDER BY
         CASE priority
@@ -518,8 +554,7 @@ export async function claimNextJob(
     )
     UPDATE sync_jobs AS jobs
     SET
-      status = 'running'::"JobStatus",
-      "startedAt" = COALESCE(jobs."startedAt", NOW()),
+      status = 'claimed'::"JobStatus",
       "lockedAt" = ${claimedAt},
       "lockedBy" = ${input.workerId},
       "lockExpiresAt" = ${lockExpiresAt},
@@ -544,8 +579,9 @@ export async function claimNextJob(
       storeId: job.storeId,
       jobId: job.id,
       eventType: JobEventType.claimed,
-      fromStatus: JobStatus.queued,
-      toStatus: JobStatus.running,
+      fromStatus:
+        job.attempts > 1 ? JobStatus.retrying : JobStatus.queued,
+      toStatus: JobStatus.claimed,
       attemptNumber: job.attempts,
       actorType: JobEventActor.worker,
       actorId: input.workerId,
@@ -566,6 +602,79 @@ export async function claimNextJob(
     claimedAt,
     workerGeneration: job.workerGeneration,
   };
+}
+
+export async function beginJobExecution(input: {
+  jobId: string;
+  storeId: string;
+  workerId: string;
+  workerGeneration?: number;
+  lockDurationMs?: number;
+}): Promise<SyncJob> {
+  const lockDurationMs = input.lockDurationMs ?? resolveLockDurationMs();
+  const now = new Date();
+  const lockExpiresAt = computeLockExpiresAt(now, lockDurationMs);
+
+  const job = await prisma.$transaction(async (tx) => {
+    const existing = await tx.syncJob.findUnique({
+      where: {
+        id: input.jobId,
+        storeId: input.storeId,
+      },
+    });
+
+    if (!existing) {
+      throw new Error(`Job not found: ${input.jobId}`);
+    }
+
+    assertWorkerOwnership(
+      existing,
+      input.workerId,
+      input.workerGeneration,
+    );
+
+    if (
+      existing.status !== JobStatus.claimed &&
+      existing.status !== JobStatus.running
+    ) {
+      throw new JobWorkerOwnershipError({
+        jobId: existing.id,
+        expectedWorkerId: existing.lockedBy,
+        actualWorkerId: input.workerId,
+        expectedGeneration: input.workerGeneration,
+        actualGeneration: existing.workerGeneration,
+      });
+    }
+
+    const updated = await tx.syncJob.update({
+      where: {
+        id: input.jobId,
+        storeId: input.storeId,
+      },
+      data: {
+        status: JobStatus.running,
+        startedAt: existing.startedAt ?? now,
+        heartbeatAt: now,
+        lockExpiresAt,
+      },
+    });
+
+    await createJobEvent(tx, {
+      storeId: updated.storeId,
+      jobId: updated.id,
+      eventType: JobEventType.progress,
+      fromStatus: JobStatus.claimed,
+      toStatus: JobStatus.running,
+      attemptNumber: updated.attempts,
+      message: "Job execution started",
+      actorType: JobEventActor.worker,
+      actorId: input.workerId,
+    });
+
+    return updated;
+  });
+
+  return job;
 }
 
 export async function heartbeatJob(input: HeartbeatJobInput): Promise<SyncJob> {
@@ -638,7 +747,12 @@ export async function cancelStoreJobsOnUninstall(storeId: string): Promise<numbe
       where: {
         storeId,
         status: {
-          in: [JobStatus.queued, JobStatus.running, JobStatus.retrying],
+          in: [
+            JobStatus.queued,
+            JobStatus.claimed,
+            JobStatus.running,
+            JobStatus.retrying,
+          ],
         },
       },
       data: {
@@ -686,20 +800,127 @@ export async function cancelStoreJobsOnUninstall(storeId: string): Promise<numbe
 
 export type JobQueueMetrics = {
   queued: number;
+  claimed: number;
   running: number;
   deadLetter: number;
   retrying: number;
+  failed: number;
+  cancelled: number;
 };
 
-export async function getJobQueueMetrics(): Promise<JobQueueMetrics> {
-  const [queued, running, deadLetter, retrying] = await Promise.all([
-    prisma.syncJob.count({ where: { status: JobStatus.queued } }),
-    prisma.syncJob.count({ where: { status: JobStatus.running } }),
-    prisma.syncJob.count({ where: { status: JobStatus.dead_letter } }),
-    prisma.syncJob.count({ where: { status: JobStatus.retrying } }),
-  ]);
+export async function countRecentCancelledBootstrapJobs(
+  windowMinutes = 60,
+): Promise<number> {
+  const since = new Date(Date.now() - windowMinutes * 60_000);
 
-  return { queued, running, deadLetter, retrying };
+  return prisma.syncJob.count({
+    where: {
+      status: JobStatus.cancelled,
+      jobType: {
+        in: [
+          JobType.bootstrap_products,
+          JobType.bootstrap_inventory,
+          JobType.orders_historical,
+        ],
+      },
+      cancelledAt: {
+        gte: since,
+      },
+    },
+  });
+}
+
+export async function getJobQueueMetrics(): Promise<JobQueueMetrics> {
+  const [queued, claimed, running, deadLetter, retrying, failed, cancelled] =
+    await Promise.all([
+      prisma.syncJob.count({ where: { status: JobStatus.queued } }),
+      prisma.syncJob.count({ where: { status: JobStatus.claimed } }),
+      prisma.syncJob.count({ where: { status: JobStatus.running } }),
+      prisma.syncJob.count({ where: { status: JobStatus.dead_letter } }),
+      prisma.syncJob.count({ where: { status: JobStatus.retrying } }),
+      prisma.syncJob.count({ where: { status: JobStatus.failed } }),
+      prisma.syncJob.count({ where: { status: JobStatus.cancelled } }),
+    ]);
+
+  return {
+    queued,
+    claimed,
+    running,
+    deadLetter,
+    retrying,
+    failed,
+    cancelled,
+  };
+}
+
+export type OrphanJobSummary = {
+  jobId: string;
+  storeId: string;
+  jobType: JobType;
+  status: JobStatus;
+  lockedBy: string | null;
+  lockExpiresAt: string | null;
+  reason: "worker_offline" | "lock_expired";
+};
+
+export async function detectOrphanJobs(input?: {
+  activeWorkerIds?: Set<string>;
+  lockDurationMs?: number;
+}): Promise<OrphanJobSummary[]> {
+  const now = new Date();
+
+  const lockedJobs = await prisma.syncJob.findMany({
+    where: {
+      status: { in: [JobStatus.claimed, JobStatus.running] },
+      lockedBy: { not: null },
+    },
+    select: {
+      id: true,
+      storeId: true,
+      jobType: true,
+      status: true,
+      lockedBy: true,
+      lockExpiresAt: true,
+      heartbeatAt: true,
+    },
+  });
+
+  const orphans: OrphanJobSummary[] = [];
+
+  for (const job of lockedJobs) {
+    const lockExpired =
+      job.lockExpiresAt !== null && job.lockExpiresAt < now;
+    const workerOffline =
+      input?.activeWorkerIds !== undefined &&
+      job.lockedBy !== null &&
+      !input.activeWorkerIds.has(job.lockedBy);
+
+    if (lockExpired || workerOffline) {
+      orphans.push({
+        jobId: job.id,
+        storeId: job.storeId,
+        jobType: job.jobType,
+        status: job.status,
+        lockedBy: job.lockedBy,
+        lockExpiresAt: job.lockExpiresAt?.toISOString() ?? null,
+        reason: workerOffline ? "worker_offline" : "lock_expired",
+      });
+    }
+  }
+
+  return orphans;
+}
+
+export async function recoverOrphanJobs(input?: {
+  activeWorkerIds?: Set<string>;
+  lockDurationMs?: number;
+}): Promise<SyncJob[]> {
+  const orphans = await detectOrphanJobs(input);
+  if (orphans.length === 0) {
+    return [];
+  }
+
+  return releaseStaleJobs(input?.lockDurationMs ?? resolveLockDurationMs());
 }
 
 export async function requeueDeadLetterJob(jobId: string): Promise<SyncJob | null> {
@@ -859,7 +1080,7 @@ export async function failJobWithClient(
     },
     data: shouldRetry
       ? {
-          status: JobStatus.queued,
+          status: JobStatus.retrying,
           availableAt: computeRetryAvailableAt(
             existing.attempts,
             input.retryDelayMs,
@@ -890,7 +1111,7 @@ export async function failJobWithClient(
     jobId: updated.id,
     eventType: JobEventType.failed,
     fromStatus: existing.status,
-    toStatus: shouldRetry ? JobStatus.queued : JobStatus.dead_letter,
+    toStatus: shouldRetry ? JobStatus.failed : JobStatus.dead_letter,
     attemptNumber: existing.attempts,
     message: input.errorMessage,
     metadataJson: input.errorCode ? { errorCode: input.errorCode } : undefined,
@@ -903,8 +1124,8 @@ export async function failJobWithClient(
       storeId: updated.storeId,
       jobId: updated.id,
       eventType: JobEventType.retried,
-      fromStatus: JobStatus.running,
-      toStatus: JobStatus.queued,
+      fromStatus: JobStatus.failed,
+      toStatus: JobStatus.retrying,
       attemptNumber: existing.attempts,
       message: input.errorMessage,
       metadataJson: {

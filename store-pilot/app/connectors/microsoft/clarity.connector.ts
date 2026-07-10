@@ -8,7 +8,7 @@ import {
   getClarityApiToken,
   loadActiveClarityIntegrationForConnector,
   markClarityIntegrationRevoked,
-} from "../../services/clarity-integration.server";
+} from "../support/clarity-connector-integration.server";
 import type { NormalizedStoreMetrics } from "../normalization/normalized-metrics";
 import { computeConnectorDataQualityScore } from "../core/data-quality";
 import { AbstractConnector } from "../core/connector.interface";

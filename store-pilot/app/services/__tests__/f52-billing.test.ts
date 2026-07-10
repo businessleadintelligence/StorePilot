@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BILLING_CONFIG } from "../../billing/plan-config";
+import { getResolvedPlanLimit } from "../../billing/plan-registry";
 import { STORE_ID, seedUsageMetricForTests, testHarness } from "./helpers/fixtures";
 import {
   DEFAULT_TRIAL_DAYS,
@@ -20,17 +21,12 @@ beforeEach(() => {
 });
 
 describe("F.5.2 Billing Foundation", () => {
-  it("1. seeds starter, growth, and agency plans", () => {
+  it("1. seeds starter, growth, and scale plans", () => {
     const harness = testHarness();
-    const plans = [...harness.dbState.plans.values()];
+    const plans = [...harness.dbState.plans.values()].filter((plan) => plan.active);
 
-    expect(plans).toHaveLength(4);
-    expect(plans.map((plan) => plan.slug).sort()).toEqual([
-      "agency",
-      "growth",
-      "pro",
-      "starter",
-    ]);
+    expect(plans).toHaveLength(3);
+    expect(plans.map((plan) => plan.slug).sort()).toEqual(["growth", "scale", "starter"]);
 
     const starter = plans.find((plan) => plan.slug === "starter");
     expect(starter).toMatchObject({
@@ -122,7 +118,7 @@ describe("F.5.2 Billing Foundation", () => {
 
     expect(subscription?.plan.slug).toBe("growth");
     expect(subscription?.plan.monthlyPrice).toBe(BILLING_CONFIG.plans.growth.price);
-    expect(subscription?.plan.maxTeamMembers).toBe(10);
+    expect(subscription?.plan.maxTeamMembers).toBe(getResolvedPlanLimit("growth", "users"));
   });
 
   it("9. ignores negative usage values", async () => {

@@ -135,12 +135,20 @@ describe("F.4.5 Onboarding UI Loader", () => {
 
   it("2. returns running onboarding status fields", async () => {
     seedRunningOnboarding();
+    const harness = testHarness();
+    harness.seedSyncJob({
+      id: "job-orders-1",
+      jobType: "orders_historical",
+      idempotencyKey: "orders-running-ui",
+      status: "running",
+      attempts: 1,
+    });
 
     const status = await getOnboardingStatus(STORE_ID);
 
     expect(status).toEqual({
       status: "running",
-      progressPercent: 85,
+      progressPercent: 66,
       progressLabel: "Syncing orders",
       productSyncStatus: "completed",
       inventorySyncStatus: "completed",
@@ -148,6 +156,8 @@ describe("F.4.5 Onboarding UI Loader", () => {
       blockedReason: null,
       blockedMessage: null,
       currentJobId: "job-orders-1",
+      currentJobStatus: "running",
+      pipelineState: "running",
       startedAt: expect.any(Date),
       completedAt: null,
     });

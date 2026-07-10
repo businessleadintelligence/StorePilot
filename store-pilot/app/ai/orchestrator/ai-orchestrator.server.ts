@@ -43,6 +43,7 @@ import {
 } from "../recommendations/recommendation-engine";
 import type { AIPersistenceRepositories } from "../persistence/types";
 import { createPrismaAIPersistence } from "../persistence/prisma-persistence";
+import { executeStructuredViaFoundation, type OrchestratorStructuredExecuteInput } from "../foundation/orchestrator-bridge";
 
 export type AIOrchestratorExecuteInput = {
   agent: AgentId | string;
@@ -86,13 +87,26 @@ export type AIOrchestratorDependencies = {
   memory: AgentMemoryService;
   lifecycle: ExecutionLifecycleTracker;
   cache: ResultCacheService;
+  structuredExecutor?: <TSchema extends z.ZodTypeAny>(
+    input: OrchestratorStructuredExecuteInput<TSchema>,
+  ) => Promise<AIStructuredResponse<z.infer<TSchema>>>;
 };
 
 export class AIOrchestrator {
   private readonly recommendations;
+  private readonly structuredExecutor: NonNullable<AIOrchestratorDependencies["structuredExecutor"]>;
 
   constructor(private readonly deps: AIOrchestratorDependencies) {
     this.recommendations = createRecommendationEngineFromRepository(deps.persistence.recommendations);
+    this.structuredExecutor =
+      deps.structuredExecutor ??
+      (async (input) =>
+        deps.provider.generateStructured({
+          messages: input.messages,
+          config: toRequestConfig(deps.config),
+          schema: input.schema,
+          schemaName: input.schemaName,
+        }));
   }
 
   async execute<T = unknown>(input: AIOrchestratorExecuteInput): Promise<AIOrchestratorExecuteResult<T>> {
@@ -289,12 +303,16 @@ export class AIOrchestrator {
 
     while (retryCount <= 1) {
       try {
-        providerResponse = await this.deps.provider.generateStructured({
+        providerResponse = await this.structuredExecutor({
+          promptId: prompt.metadata.id,
+          storeId: input.storeId,
+          merchantId: input.merchantId,
+          agentId: definition.id,
+          feature: definition.id,
           messages: [
             { role: "system", content: builtPrompt.systemMessage },
             { role: "user", content: builtPrompt.userMessage },
           ],
-          config: requestConfig,
           schema: definition.schema,
           schemaName: builtPrompt.expectedSchema,
         });
@@ -492,11 +510,35 @@ export class AIOrchestrator {
   }
 }
 
+function resolveStructuredExecutor(
+  deps: Partial<AIOrchestratorDependencies> | undefined,
+  config: ReturnType<typeof loadAIConfig>,
+): NonNullable<AIOrchestratorDependencies["structuredExecutor"]> {
+  if (deps?.structuredExecutor) {
+    return deps.structuredExecutor;
+  }
+
+  if (deps && "provider" in deps && deps.provider) {
+    const requestConfig = toRequestConfig(config);
+    return async (input) =>
+      deps.provider!.generateStructured({
+        messages: input.messages,
+        config: requestConfig,
+        schema: input.schema,
+        schemaName: input.schemaName,
+      });
+  }
+
+  return executeStructuredViaFoundation;
+}
+
 export function createAIOrchestrator(
   deps?: Partial<AIOrchestratorDependencies>,
 ): AIOrchestrator {
   const persistence = deps?.persistence ?? createPrismaAIPersistence();
   const platform = createDefaultAIPlatform();
+  const config = deps?.config ?? platform.config;
+  const provider = deps?.provider ?? platform.provider;
   const loadPrompt =
     deps?.loadPrompt ??
     createFilePromptLoader({
@@ -505,8 +547,8 @@ export function createAIOrchestrator(
 
   return new AIOrchestrator({
     persistence,
-    provider: deps?.provider ?? platform.provider,
-    config: deps?.config ?? platform.config,
+    provider,
+    config,
     loadPrompt,
     telemetry: deps?.telemetry ?? new CompositeTelemetryWriter([
       new ConsoleTelemetryWriter(),
@@ -528,6 +570,7 @@ export function createAIOrchestrator(
         },
         store: async (input) => persistence.cache.store(input),
       }),
+    structuredExecutor: resolveStructuredExecutor(deps, config),
   });
 }
 

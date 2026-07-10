@@ -17,6 +17,7 @@ import {
   lookupStoreForWebhook,
   markWebhookEventProcessed,
 } from "./webhook.server";
+import { scheduleGraphUpdateFromWebhook } from "./knowledge-graph-webhook.server";
 
 type ProductDbClient = Pick<typeof prisma, "product">;
 
@@ -1916,6 +1917,12 @@ export async function handleProductCreateWebhook(
       await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
 
+    void scheduleGraphUpdateFromWebhook({
+      storeId: begin.storeId,
+      topic: input.topic,
+      payload: input.payload,
+    }).catch(() => undefined);
+
     return result;
   } catch (error) {
     if (begin.eventId && begin.kind === "ready") {
@@ -1990,6 +1997,12 @@ export async function handleProductUpdateWebhook(
     if (begin.eventId) {
       await markWebhookEventProcessed(begin.eventId, begin.processingOwner);
     }
+
+    void scheduleGraphUpdateFromWebhook({
+      storeId: begin.storeId,
+      topic: input.topic,
+      payload: input.payload,
+    }).catch(() => undefined);
 
     return result;
   } catch (error) {

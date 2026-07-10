@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BILLING_CONFIG } from "../../billing/plan-config";
+import { getResolvedPlanLimit } from "../../billing/plan-registry";
 import { STORE_ID, seedUsageMetricForTests, testHarness } from "./helpers/fixtures";
 import {
   createTrialSubscription,
@@ -15,6 +16,9 @@ import {
 
 const STARTER_AI_LIMIT = BILLING_CONFIG.limits.starter.aiExecutions;
 const GROWTH_AI_LIMIT = BILLING_CONFIG.limits.growth.aiExecutions;
+const STARTER_PRODUCT_LIMIT = getResolvedPlanLimit("starter", "products");
+const GROWTH_PRODUCT_LIMIT = getResolvedPlanLimit("growth", "products");
+const STARTER_USER_LIMIT = getResolvedPlanLimit("starter", "users");
 
 beforeEach(() => {
   const harness = testHarness();
@@ -55,25 +59,25 @@ describe("F.5.3 Entitlements Engine", () => {
       subscriptionStatus: null,
       fallbackReason: "subscription_missing",
       limits: {
-        products: 1000,
-        orders: 5000,
+        products: STARTER_PRODUCT_LIMIT,
+        orders: STARTER_PRODUCT_LIMIT,
         aiCreditsPerMonth: STARTER_AI_LIMIT,
-        maxTeamMembers: 2,
+        maxTeamMembers: STARTER_USER_LIMIT,
       },
     });
   });
 
   it("2. enforces starter product limits", async () => {
     await createTrialSubscription(STORE_ID, "starter");
-    seedProducts(1000);
+    seedProducts(STARTER_PRODUCT_LIMIT);
 
     const atLimit = await checkUsageLimit(STORE_ID, "products", 0);
     const overLimit = await checkUsageLimit(STORE_ID, "products", 1);
 
     expect(atLimit).toMatchObject({
       allowed: true,
-      used: 1000,
-      limit: 1000,
+      used: STARTER_PRODUCT_LIMIT,
+      limit: STARTER_PRODUCT_LIMIT,
       remaining: 0,
       reason: null,
     });
@@ -92,10 +96,10 @@ describe("F.5.3 Entitlements Engine", () => {
     const starterEntitlements = await getStoreEntitlements(STORE_ID);
 
     expect(growthCheck.allowed).toBe(true);
-    expect(growthCheck.limit).toBe(10000);
-    expect(growthCheck.remaining).toBe(8500);
+    expect(growthCheck.limit).toBe(GROWTH_PRODUCT_LIMIT);
+    expect(growthCheck.remaining).toBe(GROWTH_PRODUCT_LIMIT - 1500);
     expect(starterEntitlements?.fallbackReason).toBeNull();
-    expect(starterEntitlements?.limits.products).toBe(10000);
+    expect(starterEntitlements?.limits.products).toBe(GROWTH_PRODUCT_LIMIT);
   });
 
   it("4. calculates remaining product capacity before the limit", async () => {
@@ -107,8 +111,8 @@ describe("F.5.3 Entitlements Engine", () => {
     expect(check).toMatchObject({
       allowed: true,
       used: 997,
-      limit: 1000,
-      remaining: 3,
+      limit: STARTER_PRODUCT_LIMIT,
+      remaining: STARTER_PRODUCT_LIMIT - 997,
       reason: null,
     });
   });
@@ -182,8 +186,8 @@ describe("F.5.3 Entitlements Engine", () => {
       products: {
         allowed: true,
         used: 0,
-        limit: 10000,
-        remaining: 10000,
+        limit: GROWTH_PRODUCT_LIMIT,
+        remaining: GROWTH_PRODUCT_LIMIT,
         reason: null,
       },
       orders: {
@@ -234,7 +238,7 @@ describe("F.5.3 Entitlements Engine", () => {
 
   it("11. exposes merchant-safe entitlement responses only", async () => {
     await createTrialSubscription(STORE_ID, "starter");
-    seedProducts(1000);
+    seedProducts(STARTER_PRODUCT_LIMIT);
 
     const summary = await getUsageSummary(STORE_ID);
     const serialized = JSON.stringify(summary);

@@ -2,7 +2,7 @@ import { fetchGa4AnalyticsReport } from "../../google/analytics/ga4-client";
 import { parseGa4Report, type Ga4RawReport } from "../../google/analytics/ga4-parser";
 import { GoogleApiError } from "../../google/shared/google-api-error";
 import { getValidGoogleAccessToken } from "../../google/oauth/google-token.service";
-import { loadActiveGoogleIntegrationForConnector, markGoogleIntegrationRevoked } from "../../services/google-integration.server";
+import { loadActiveGoogleIntegrationForConnector, markGoogleIntegrationRevoked } from "../support/google-connector-integration.server";
 import type { NormalizedStoreMetrics } from "../normalization/normalized-metrics";
 import { computeConnectorDataQualityScore } from "../core/data-quality";
 import { AbstractConnector } from "../core/connector.interface";

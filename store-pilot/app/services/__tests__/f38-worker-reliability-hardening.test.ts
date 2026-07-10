@@ -115,7 +115,7 @@ describe("F.3.8 Worker Critical Reliability Hardening", () => {
 
     expect(released).toHaveLength(1);
     expect(released[0]?.id).toBe(job.id);
-    expect(harness.dbState.syncJobs.get(job.id)?.status).toBe("queued");
+    expect(harness.dbState.syncJobs.get(job.id)?.status).toBe("retrying");
   });
 
   it("3. completed job auto-repairs onboarding phase mismatch", async () => {
@@ -139,7 +139,7 @@ describe("F.3.8 Worker Critical Reliability Hardening", () => {
 
     expect(repaired).toBe(1);
     expect(harness.getOnboarding(STORE_ID)?.productSyncStatus).toBe("completed");
-    expect(harness.getOnboarding(STORE_ID)?.inventorySyncStatus).toBe("running");
+    expect(harness.getOnboarding(STORE_ID)?.inventorySyncStatus).toBe("queued");
   });
 
   it("4. orders blocked path completes onboarding without dead letter", async () => {

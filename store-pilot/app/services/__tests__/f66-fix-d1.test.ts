@@ -303,7 +303,7 @@ describe("F.6.6 FIX-D1", () => {
     const onboarding = harness.getOnboarding(STORE_ID);
 
     expect(onboarding?.productSyncStatus).toBe("blocked");
-    expect(onboarding?.inventorySyncStatus).toBe("running");
+    expect(onboarding?.inventorySyncStatus).toBe("queued");
     expect(result.phase).toBe("INVENTORY");
     expect(harness.dbState.syncJobs.size).toBe(2);
     expect(

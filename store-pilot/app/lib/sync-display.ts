@@ -1,4 +1,8 @@
-import type { OnboardingPhaseStatus, OnboardingStatus } from "@prisma/client";
+import type {
+  JobStatus,
+  OnboardingPhaseStatus,
+  OnboardingStatus,
+} from "@prisma/client";
 
 export type SyncDomainStatus = {
   synced: boolean;
@@ -11,7 +15,15 @@ export type OrdersSyncDomainStatus = SyncDomainStatus & {
   blockedReason: string | null;
 };
 
-export type SyncStatusBadge = "Synced" | "Syncing" | "Blocked" | "Not Started";
+export type SyncStatusBadge =
+  | "Synced"
+  | "Syncing"
+  | "Queued"
+  | "Claimed"
+  | "Blocked"
+  | "Failed"
+  | "Cancelled"
+  | "Not Started";
 
 export type SyncStatusDomainKey = "products" | "inventory" | "orders";
 
@@ -24,7 +36,12 @@ export type SerializedStoreSyncStatus = {
 
 function isPhaseSyncing(
   phaseStatus: OnboardingPhaseStatus | null | undefined,
+  currentJobStatus?: JobStatus | null,
 ): boolean {
+  if (currentJobStatus === "claimed") {
+    return true;
+  }
+
   return phaseStatus === "running" || phaseStatus === "queued";
 }
 
@@ -32,12 +49,33 @@ export function getSyncStatusBadge(
   phaseStatus: OnboardingPhaseStatus | null | undefined,
   domain: SyncDomainStatus | OrdersSyncDomainStatus,
   domainKey: SyncStatusDomainKey,
+  currentJobStatus?: JobStatus | null,
 ): SyncStatusBadge {
   if (domainKey === "orders" && "blocked" in domain && domain.blocked) {
     return "Blocked";
   }
 
-  if (isPhaseSyncing(phaseStatus)) {
+  if (currentJobStatus === "claimed") {
+    return "Claimed";
+  }
+
+  if (currentJobStatus === "cancelled") {
+    return "Cancelled";
+  }
+
+  if (currentJobStatus === "retrying") {
+    return "Syncing";
+  }
+
+  if (phaseStatus === "queued") {
+    return "Queued";
+  }
+
+  if (phaseStatus === "failed") {
+    return "Failed";
+  }
+
+  if (isPhaseSyncing(phaseStatus, currentJobStatus)) {
     return "Syncing";
   }
 

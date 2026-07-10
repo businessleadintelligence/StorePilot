@@ -1,6 +1,6 @@
-export const BILLING_PLAN_SLUGS = ["starter", "growth", "pro", "agency"] as const;
+import type { BillingPlanSlug } from "./plan-registry";
 
-export type BillingPlanSlug = (typeof BILLING_PLAN_SLUGS)[number];
+export type { BillingPlanSlug };
 
 export const COMMERCIAL_SUBSCRIPTION_STATUSES = [
   "active",
@@ -51,7 +51,13 @@ export type BillingPlanDefinition = {
   automationCenterEnabled: boolean;
   productionHealthAlerts: "basic" | "standard" | "advanced";
   multiStoreAnalytics: boolean;
-  agencyFeatures: boolean;
+  workerQueueTier: "standard" | "normal" | "priority";
+  executiveBriefingsPerMonth: number;
+  predictionsPerMonth: number;
+  experimentsPerMonth: number;
+  knowledgeGraphNodesLimit: number;
+  storageMbLimit: number;
+  reportsPerMonth: number;
   primaryPlan?: boolean;
 };
 
@@ -66,6 +72,12 @@ export type BillingUsageSnapshot = {
   backgroundJobs: number;
   dataExports: number;
   storageMb: number;
+  executiveBriefings: number;
+  predictions: number;
+  experiments: number;
+  knowledgeGraphNodes: number;
+  products: number;
+  reports: number;
 };
 
 export type BillingLimitCheckResult = {
@@ -122,6 +134,7 @@ export type BillingDashboardData = {
   canCancel: boolean;
   historyPlaceholder: boolean;
   invoicesPlaceholder: boolean;
+  workerQueueTier: "standard" | "normal" | "priority";
 };
 
 export type BillingActionResult = {
@@ -145,4 +158,14 @@ export type OnboardingBillingSummary = {
   trialExplanation: string;
   upgradeMessage: string;
   plans: BillingPlanSummary[];
+};
+
+export type FeatureGateViewModel = {
+  available: boolean;
+  featureName: string;
+  upgradeText: string;
+  minimumPlanName: string;
+  upgradeTargetPlan: BillingPlanSlug | null;
+  upgradePriceUsd: number | null;
+  currentPlanName: string;
 };

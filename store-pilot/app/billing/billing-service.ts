@@ -164,8 +164,9 @@ export async function handleBillingSubscriptionWebhook(input: {
 
 function mapPlanNameToSlug(name: string): BillingPlanSlug {
   const normalized = name.toLowerCase();
-  if (normalized.includes("agency")) return "agency";
-  if (normalized.includes("pro")) return "pro";
+  if (normalized.includes("scale")) return "scale";
+  if (normalized.includes("pro")) return "scale";
+  if (normalized.includes("agency")) return "scale";
   if (normalized.includes("growth")) return "growth";
   return "starter";
 }

@@ -3,14 +3,20 @@ import { JobPriority, JobType, OnboardingStatus } from "@prisma/client";
 import prisma from "../db.server";
 import { updateMerchantLearningProfile } from "../operations/operations-metrics";
 import { loadOperationsSnapshot, saveOperationsSnapshot } from "../operations/operations-persistence";
-import { getExecutiveBrief } from "./executive-brief.server";
 import { enqueueJob, releaseStaleJobs } from "./job.server";
 import { getStoreMetrics } from "./metrics.server";
 import { getStoreRecommendations } from "./recommendations.server";
+import {
+  purgeAgedOperationalRecords,
+  scanPersistedJsonForCustomerPii,
+} from "./privacy-retention.server";
+import {
+  detectShopifyScopeDrift,
+  formatScopeDriftAlert,
+} from "./scope-drift-monitor.server";
+import { migratePlaintextSecretTokens } from "./token-migration.server";
 
 const DEFAULT_STORE_BATCH_SIZE = 50;
-const WEBHOOK_RETENTION_DAYS = 30;
-
 export type CronJobResult = {
   jobId: string;
   ok: boolean;
@@ -90,16 +96,7 @@ export async function runExpiredSessionsCron(): Promise<CronJobResult> {
 }
 
 export async function runCleanupJobsCron(): Promise<CronJobResult> {
-  const cutoff = new Date(Date.now() - WEBHOOK_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-
-  const deletedWebhookEvents = await prisma.webhookEvent.deleteMany({
-    where: {
-      createdAt: {
-        lt: cutoff,
-      },
-      processedSuccessfully: true,
-    },
-  });
+  const retention = await purgeAgedOperationalRecords();
 
   const clearedProcessingLeases = await prisma.webhookEvent.updateMany({
     where: {
@@ -121,10 +118,70 @@ export async function runCleanupJobsCron(): Promise<CronJobResult> {
     ok: true,
     message: "Cleanup jobs completed",
     details: {
-      deletedWebhookEvents: deletedWebhookEvents.count,
+      ...retention,
       clearedProcessingLeases: clearedProcessingLeases.count,
-      webhookRetentionDays: WEBHOOK_RETENTION_DAYS,
     },
+  };
+}
+
+export async function runPrivacyPiiScanCron(): Promise<CronJobResult> {
+  const scan = await scanPersistedJsonForCustomerPii();
+
+  if (scan.violations.length > 0) {
+    console.warn("[privacy-pii-scan]", {
+      operation: "json_pii_scan_violations",
+      samplesScanned: scan.samplesScanned,
+      violationCount: scan.violations.length,
+      violations: scan.violations.slice(0, 10),
+    });
+  }
+
+  return {
+    jobId: "privacy-pii-scan",
+    ok: scan.violations.length === 0,
+    message:
+      scan.violations.length === 0
+        ? "JSON PII scan clean"
+        : "JSON PII scan found violations",
+    details: {
+      samplesScanned: scan.samplesScanned,
+      violationCount: scan.violations.length,
+      violations: scan.violations.slice(0, 10),
+    },
+  };
+}
+
+export async function runScopeDriftMonitorCron(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CronJobResult> {
+  const report = detectShopifyScopeDrift(env);
+
+  if (!report.ok) {
+    console.error("[scope-drift-monitor]", {
+      operation: "shopify_scope_drift_detected",
+      alert: formatScopeDriftAlert(report),
+      report,
+    });
+  }
+
+  return {
+    jobId: "scope-drift-monitor",
+    ok: report.ok,
+    message: report.ok ? "Shopify scopes aligned" : formatScopeDriftAlert(report),
+    details: report as unknown as Record<string, unknown>,
+  };
+}
+
+export async function runTokenMigrationCron(): Promise<CronJobResult> {
+  const migration = await migratePlaintextSecretTokens();
+
+  return {
+    jobId: "token-migration",
+    ok: !migration.skipped,
+    message: migration.skipped
+      ? "Token migration skipped (encryption key missing)"
+      : "Token migration completed",
+    details: migration as unknown as Record<string, unknown>,
   };
 }
 
@@ -309,13 +366,13 @@ export async function runRecommendationRefreshCron(
   };
 }
 
-export async function executeExecutiveBriefJob(storeId: string): Promise<void> {
-  const store = await prisma.store.findUnique({
-    where: { id: storeId },
-    select: { currency: true },
-  });
+import { scheduleExecutiveCooJob } from "../executive/scheduler/executive-scheduler";
 
-  await getExecutiveBrief(storeId, store?.currency ?? "USD");
+export async function executeExecutiveBriefJob(storeId: string): Promise<void> {
+  void scheduleExecutiveCooJob({
+    storeId,
+    idempotencyKey: `executive:coo:morning:${storeId}:${new Date().toISOString().slice(0, 10)}`,
+  }).catch(() => undefined);
 }
 
 export async function executeMetricsRecomputeJob(storeId: string): Promise<void> {

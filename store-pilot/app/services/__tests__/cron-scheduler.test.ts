@@ -36,6 +36,38 @@ vi.mock("../../db.server", () => ({
       deleteMany: vi.fn(),
       updateMany: vi.fn(),
     },
+    customerDataExport: {
+      deleteMany: vi.fn(),
+    },
+    syncJob: {
+      deleteMany: vi.fn(),
+    },
+    jobEvent: {
+      deleteMany: vi.fn(),
+    },
+    aiAgentRun: {
+      deleteMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    aiAgentResult: {
+      deleteMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    evidenceHistory: {
+      deleteMany: vi.fn(),
+    },
+    evidenceObservation: {
+      deleteMany: vi.fn(),
+    },
+    aiResultCacheEntry: {
+      deleteMany: vi.fn(),
+    },
+    evidence: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    knowledgeGraphNode: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     storeOnboarding: {
       findMany: vi.fn(),
     },
@@ -84,6 +116,9 @@ describe("cron scheduler registry", () => {
       "daily-operating-plan",
       "metrics-aggregation",
       "recommendation-refresh",
+      "privacy-pii-scan",
+      "scope-drift-monitor",
+      "token-migration",
     ];
 
     for (const jobId of expected) {
@@ -113,12 +148,21 @@ describe("cron job runners", () => {
   });
 
   it("runs cleanup jobs", async () => {
+    vi.mocked(prisma.customerDataExport.deleteMany).mockResolvedValue({ count: 1 });
     vi.mocked(prisma.webhookEvent.deleteMany).mockResolvedValue({ count: 10 });
+    vi.mocked(prisma.syncJob.deleteMany).mockResolvedValue({ count: 2 });
+    vi.mocked(prisma.jobEvent.deleteMany).mockResolvedValue({ count: 3 });
+    vi.mocked(prisma.aiAgentRun.deleteMany).mockResolvedValue({ count: 4 });
+    vi.mocked(prisma.aiAgentResult.deleteMany).mockResolvedValue({ count: 5 });
+    vi.mocked(prisma.evidenceHistory.deleteMany).mockResolvedValue({ count: 6 });
+    vi.mocked(prisma.evidenceObservation.deleteMany).mockResolvedValue({ count: 7 });
+    vi.mocked(prisma.aiResultCacheEntry.deleteMany).mockResolvedValue({ count: 8 });
     vi.mocked(prisma.webhookEvent.updateMany).mockResolvedValue({ count: 2 });
 
     const result = await runCleanupJobsCron();
     expect(result.ok).toBe(true);
     expect(result.details?.deletedWebhookEvents).toBe(10);
+    expect(result.details?.expiredCustomerDataExports).toBe(1);
   });
 
   it("runs learning engine for completed operations", async () => {

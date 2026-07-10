@@ -16,7 +16,6 @@ import {
 } from "../google/oauth/google-oauth.service";
 import {
   getValidGoogleAccessToken,
-  logGoogleIntegrationError,
   logGoogleIntegrationEvent,
   persistGoogleTokens,
 } from "../google/oauth/google-token.service";
@@ -307,66 +306,20 @@ export async function skipGoogleAnalyticsOnboarding(storeId: string): Promise<vo
   });
 }
 
-export async function loadActiveGoogleIntegrationForConnector(
-  storeId: string,
-): Promise<GoogleIntegration | null> {
-  return prisma.googleIntegration.findFirst({
-    where: {
-      storeId,
-      isActive: true,
-      analyticsPropertyId: { not: null },
-    },
-  });
-}
+import {
+  loadActiveGoogleIntegrationForConnector,
+  loadActiveGoogleIntegrationForGscConnector,
+  loadActiveGoogleIntegrationForPageSpeedConnector,
+  resolvePageSpeedStoreUrlForConnector,
+} from "../connectors/support/google-connector-integration.server";
 
-export async function loadActiveGoogleIntegrationForGscConnector(
-  storeId: string,
-): Promise<GoogleIntegration | null> {
-  return prisma.googleIntegration.findFirst({
-    where: {
-      storeId,
-      isActive: true,
-      searchConsoleSiteUrl: { not: null },
-    },
-  });
-}
-
-export async function loadActiveGoogleIntegrationForPageSpeedConnector(
-  storeId: string,
-): Promise<GoogleIntegration | null> {
-  return prisma.googleIntegration.findFirst({
-    where: {
-      storeId,
-      isActive: true,
-      refreshToken: { not: "" },
-    },
-  });
-}
-
-export async function resolvePageSpeedStoreUrlForConnector(
-  storeId: string,
-  integration: GoogleIntegration,
-  contextPageUrl?: string,
-): Promise<string | null> {
-  if (contextPageUrl?.trim()) {
-    return resolvePageSpeedStoreUrl({ pageUrl: contextPageUrl });
-  }
-
-  if (integration.searchConsoleSiteUrl) {
-    return resolvePageSpeedStoreUrl({
-      searchConsoleSiteUrl: integration.searchConsoleSiteUrl,
-    });
-  }
-
-  const store = await prisma.store.findUnique({
-    where: { id: storeId },
-    select: { shopifyDomain: true },
-  });
-
-  return resolvePageSpeedStoreUrl({
-    shopifyDomain: store?.shopifyDomain ?? null,
-  });
-}
+export {
+  loadActiveGoogleIntegrationForConnector,
+  loadActiveGoogleIntegrationForGscConnector,
+  loadActiveGoogleIntegrationForPageSpeedConnector,
+  markGoogleIntegrationRevoked,
+  resolvePageSpeedStoreUrlForConnector,
+} from "../connectors/support/google-connector-integration.server";
 
 export async function syncGoogleAnalyticsForStore(storeId: string): Promise<{
   syncedAt: string;
@@ -571,19 +524,6 @@ export async function fetchGa4ReportForStore(storeId: string) {
   });
 
   return parseGa4Report(raw);
-}
-
-export async function markGoogleIntegrationRevoked(storeId: string, reason: string): Promise<void> {
-  await prisma.googleIntegration.updateMany({
-    where: { storeId },
-    data: { isActive: false },
-  });
-
-  logGoogleIntegrationError("Google integration revoked", {
-    storeId,
-    operation: "google_integration_revoked",
-    reason,
-  });
 }
 
 export function redactGoogleIntegrationForLogs(

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 
 export type StoreMetrics = {
   products: number;
@@ -115,13 +116,12 @@ export async function getStoreMetrics(storeId: string): Promise<StoreMetrics> {
         },
       }),
       prisma.order.count({
-        where: { storeId },
+        where: orderWhereForMetrics(storeId),
       }),
       prisma.order.aggregate({
-        where: {
-          storeId,
+        where: orderWhereForMetrics(storeId, {
           isPaid: true,
-        },
+        }),
         _sum: {
           totalPriceAmount: true,
         },

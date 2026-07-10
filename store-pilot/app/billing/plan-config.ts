@@ -1,100 +1,85 @@
+/**
+ * Legacy compatibility layer — all values derive from plan-registry.ts.
+ * Do not add pricing, limits, or features here.
+ */
+
+import {
+  GLOBAL_TRIAL_DAYS,
+  PRIMARY_BILLING_PLAN_SLUG,
+  PUBLIC_PLAN_SLUGS,
+  getPlanEntry,
+  isFeatureAvailable,
+  listPublicPlans,
+  resolveLimitValue,
+  type BillingPlanSlug,
+  type FeatureKey,
+  type LimitKey,
+} from "./plan-registry";
+
+export type { BillingPlanSlug };
+export {
+  PUBLIC_PLAN_SLUGS as BILLING_PLAN_SLUGS,
+  PRIMARY_BILLING_PLAN_SLUG,
+  GLOBAL_TRIAL_DAYS,
+};
+
 export const BILLING_CONFIG = {
-  trialDays: 3,
-
-  plans: {
-    starter: {
-      price: 29,
-      trialDays: 3,
-    },
-
-    growth: {
-      price: 79,
-      trialDays: 3,
-    },
-
-    pro: {
-      price: 199,
-      trialDays: 3,
-    },
-
-    agency: {
-      price: 399,
-      trialDays: 3,
-    },
-  },
-
-  limits: {
-    starter: {
-      stores: 1,
-      aiExecutions: 1000,
-      automations: 10,
-      connectorSyncFrequencyHours: 24,
-    },
-
-    growth: {
-      stores: 1,
-      aiExecutions: 10000,
-      automations: 100,
-      connectorSyncFrequencyHours: 6,
-    },
-
-    pro: {
-      stores: 3,
-      aiExecutions: 50000,
-      automations: 500,
-      connectorSyncFrequencyHours: 2,
-    },
-
-    agency: {
-      stores: 10,
-      aiExecutions: 200000,
-      automations: 2000,
-      connectorSyncFrequencyHours: 1,
-    },
-  },
-
-  features: {
-    starter: {
-      executiveCOO: false,
-      automationCenter: false,
-      advancedAnalytics: false,
-    },
-
-    growth: {
-      executiveCOO: true,
-      automationCenter: true,
-      advancedAnalytics: false,
-    },
-
-    pro: {
-      executiveCOO: true,
-      automationCenter: true,
-      advancedAnalytics: true,
-    },
-
-    agency: {
-      executiveCOO: true,
-      automationCenter: true,
-      advancedAnalytics: true,
-    },
-  },
+  trialDays: GLOBAL_TRIAL_DAYS,
+  plans: Object.fromEntries(
+    listPublicPlans().map((plan) => [
+      plan.slug,
+      { price: plan.monthlyPriceUsd, trialDays: plan.trialDays },
+    ]),
+  ) as Record<BillingPlanSlug, { price: number; trialDays: number }>,
+  limits: Object.fromEntries(
+    listPublicPlans().map((plan) => [
+      plan.slug,
+      {
+        stores: resolveLimitValue(plan.limits.stores),
+        aiExecutions: resolveLimitValue(plan.limits.ai_requests),
+        automations: resolveLimitValue(plan.limits.automations),
+        connectorSyncFrequencyHours: plan.limits.sync_frequency_hours === "unlimited"
+          ? 1
+          : plan.limits.sync_frequency_hours,
+      },
+    ]),
+  ) as Record<
+    BillingPlanSlug,
+    {
+      stores: number;
+      aiExecutions: number;
+      automations: number;
+      connectorSyncFrequencyHours: number;
+    }
+  >,
+  features: Object.fromEntries(
+    listPublicPlans().map((plan) => [
+      plan.slug,
+      {
+        executiveCOO: isFeatureAvailable(plan.slug, "executive_workspace"),
+        automationCenter: isFeatureAvailable(plan.slug, "experiment_engine"),
+        advancedAnalytics: isFeatureAvailable(plan.slug, "priority_ai"),
+      },
+    ]),
+  ) as Record<
+    BillingPlanSlug,
+    {
+      executiveCOO: boolean;
+      automationCenter: boolean;
+      advancedAnalytics: boolean;
+    }
+  >,
 } as const;
-
-export type BillingPlanSlug = keyof typeof BILLING_CONFIG.plans;
-
-export const BILLING_PLAN_SLUGS = Object.keys(BILLING_CONFIG.plans) as BillingPlanSlug[];
-
-export const PRIMARY_BILLING_PLAN_SLUG: BillingPlanSlug = "growth";
 
 export function getBillingTrialDays(planSlug?: BillingPlanSlug): number {
   if (planSlug) {
-    return BILLING_CONFIG.plans[planSlug].trialDays;
+    return getPlanEntry(planSlug).trialDays;
   }
-  return BILLING_CONFIG.trialDays;
+  return GLOBAL_TRIAL_DAYS;
 }
 
 export function getBillingPlanPrice(planSlug: BillingPlanSlug): number {
-  return BILLING_CONFIG.plans[planSlug].price;
+  return getPlanEntry(planSlug).monthlyPriceUsd;
 }
 
 export function getBillingPlanLimits(planSlug: BillingPlanSlug) {
@@ -106,9 +91,12 @@ export function getBillingPlanFeatures(planSlug: BillingPlanSlug) {
 }
 
 export function getBillingPlanEntry(planSlug: BillingPlanSlug) {
+  const plan = getPlanEntry(planSlug);
   return {
-    plan: BILLING_CONFIG.plans[planSlug],
-    limits: getBillingPlanLimits(planSlug),
-    features: getBillingPlanFeatures(planSlug),
+    plan: { price: plan.monthlyPriceUsd, trialDays: plan.trialDays },
+    limits: BILLING_CONFIG.limits[planSlug],
+    features: BILLING_CONFIG.features[planSlug],
   };
 }
+
+export type { FeatureKey, LimitKey };

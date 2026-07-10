@@ -18,6 +18,7 @@ import {
   gateWebhookEvent,
   lookupStoreForWebhook,
 } from "./webhook.server";
+import { scheduleGraphUpdateFromWebhook } from "./knowledge-graph-webhook.server";
 
 export type OrdersDbClient = Pick<typeof prisma, "order" | "orderLineItem">;
 
@@ -641,6 +642,12 @@ async function handleOrderWebhook(
     }
 
     await finalizeWebhookClaim(eventId, true, processingOwner);
+
+    void scheduleGraphUpdateFromWebhook({
+      storeId,
+      topic: input.topic,
+      payload: input.payload,
+    }).catch(() => undefined);
 
     return result;
   } catch (error) {
@@ -1395,8 +1402,24 @@ export async function upsertOrderRow(
         shopifyOrderId: row.shopifyOrderId,
       },
     },
-    select: { id: true, shopifyUpdatedAt: true },
+    select: { id: true, shopifyUpdatedAt: true, privacyRedacted: true },
   });
+
+  if (existing?.privacyRedacted) {
+    logOrdersSync("info", "Order upsert skipped for privacy-redacted order", {
+      shop: "",
+      storeId,
+      operation: "stale_write_skipped",
+      shopifyOrderId: row.shopifyOrderId,
+      reason: "privacy_redacted",
+    });
+
+    return {
+      orderId: existing.id,
+      created: false,
+      staleSkipped: true,
+    };
+  }
 
   if (existing) {
     if (row.shopifyUpdatedAt <= existing.shopifyUpdatedAt) {

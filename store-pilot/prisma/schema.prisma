@@ -12,6 +12,7 @@ datasource db {
 enum SubscriptionPlan {
   starter
   growth
+  scale
   agency
 }
 
@@ -99,16 +100,36 @@ enum JobType {
   recommendations_generate
   executive_brief_generate
   founder_maintenance
+  knowledge_ingest
+  knowledge_fact_refresh
+  knowledge_graph_build
+  knowledge_graph_incremental
+  learning_bootstrap
+  historical_intelligence
+  quick_wins_generate
+  executive_decision_generate
+  executive_coo_generate
+  root_cause_generate
+  prediction_generate
+  experiment_generate
+  merchant_intelligence_refresh
 }
 
 enum JobStatus {
   queued
+  claimed
   running
   retrying
   completed
   failed
   dead_letter
   cancelled
+}
+
+enum WorkerInstanceStatus {
+  active
+  draining
+  stopped
 }
 
 enum JobPriority {
@@ -201,6 +222,94 @@ model Store {
   aiRecommendations    AiRecommendation[]
   aiMemoryRecords      AiMemoryRecord[]
   aiResultCacheEntries AiResultCacheEntry[]
+  aiCostLedger         AiCostLedger[]
+  aiMerchantBudget     AiMerchantBudget?
+  evidenceRecords      Evidence[]
+  evidenceSources      EvidenceSource[]
+  evidenceObservations EvidenceObservation[]
+  evidenceHistory      EvidenceHistory[]
+  evidenceRelationships EvidenceRelationship[]
+  knowledgeSyncCheckpoint KnowledgeSyncCheckpoint?
+  knowledgeReadiness   KnowledgeReadiness?
+  knowledgeGraphNodes  KnowledgeGraphNode[]
+  knowledgeGraphEdges  KnowledgeGraphEdge[]
+  knowledgeGraphRelationships KnowledgeGraphRelationship[]
+  knowledgeGraphVersions KnowledgeGraphVersion[]
+  knowledgeGraphSnapshots KnowledgeGraphSnapshot[]
+  knowledgeGraphMetadata KnowledgeGraphMetadata?
+  knowledgeGraphIntegrity KnowledgeGraphIntegrity?
+  knowledgeGraphStatistics KnowledgeGraphStatistics?
+  knowledgeGraphSearchIndex KnowledgeGraphSearchIndex[]
+  knowledgeGraphBuildCheckpoint KnowledgeGraphBuildCheckpoint?
+  storeLearningProfile        StoreLearningProfile?
+  learningReadiness           LearningReadiness?
+  learningVelocities          LearningVelocity[]
+  learningEta                 LearningEta?
+  learningPriorities          LearningPriority[]
+  historicalMemory            HistoricalMemory?
+  historicalSnapshots         HistoricalSnapshot[]
+  patternSeeds                PatternSeed[]
+  confidenceSeeds             ConfidenceSeed[]
+  merchantBaselines           MerchantBaseline[]
+  businessDnaVersions         BusinessDnaVersion[]
+  quickWins                   QuickWin[]
+  quickWinSummary             QuickWinSummary?
+  executiveDecisions          ExecutiveDecision[]
+  decisionTasks               DecisionTask[]
+  decisionHistory             DecisionHistory[]
+  executiveBriefings          ExecutiveBriefing[]
+  dailyOperatingPlans         DailyOperatingPlan[]
+  operationalReadiness        OperationalReadiness?
+  decisionScores              DecisionScore[]
+  businessContextSnapshots    BusinessContextSnapshot[]
+  rootCauses                  RootCause[]
+  causalChains                CausalChain[]
+  causalTimelines             CausalTimeline[]
+  signalCorrelations          SignalCorrelation[]
+  causeConfidences            CauseConfidence[]
+  impactAssessments           ImpactAssessment[]
+  causalGraphEdges            CausalGraphEdge[]
+  rootCauseHistory            RootCauseHistory[]
+  predictions                 Prediction[]
+  predictionHistory           PredictionHistory[]
+  predictionConfidences       PredictionConfidence[]
+  forecastModels              ForecastModel[]
+  forecastSnapshots           ForecastSnapshot[]
+  preventionActions           PreventionAction[]
+  riskAssessments             RiskAssessment[]
+  forecastAccuracy            ForecastAccuracy[]
+  businessStability           BusinessStability?
+  experiments                 Experiment[]
+  experimentTemplates         ExperimentTemplate[]
+  experimentOpportunities     ExperimentOpportunity[]
+  experimentRecommendations   ExperimentRecommendation[]
+  experimentBaselines         ExperimentBaseline[]
+  experimentVariants          ExperimentVariant[]
+  experimentObservations      ExperimentObservation[]
+  experimentResults           ExperimentResult[]
+  experimentWinners           ExperimentWinner[]
+  experimentHistory           ExperimentHistory[]
+  experimentLearning          ExperimentLearning[]
+  experimentConfidences       ExperimentConfidence[]
+  decisionJournal             DecisionJournal[]
+  merchantDecisions           MerchantDecision[]
+  merchantFeedback            MerchantFeedback[]
+  adaptiveMemory              AdaptiveMemory[]
+  recommendationOutcomes      RecommendationOutcome[]
+  predictionAccuracyRecords   PredictionAccuracyRecord[]
+  predictionValidations       PredictionValidation[]
+  rootCauseValidations        RootCauseValidation[]
+  merchantPreferences         MerchantPreference[]
+  merchantBehaviorProfiles    MerchantBehaviorProfile[]
+  personalizationProfiles     PersonalizationProfile[]
+  adaptiveConfidences         AdaptiveConfidence[]
+  adaptiveScore               AdaptiveScore?
+  decisionTimelines           DecisionTimeline[]
+  merchantTimeline            MerchantTimeline[]
+  businessMemoryVersions      BusinessMemoryVersion[]
+  learningHistory             LearningHistory[]
+  learningSnapshots           LearningSnapshot[]
+  learningAttributions        LearningAttribution[]
 
   @@index([active, subscriptionPlan])
   @@index([briefingTime])
@@ -224,6 +333,9 @@ model User {
   @@map("users")
 }
 
+/// @privacy merchant-pii — OAuth session; firstName/lastName not persisted (alias-only)
+/// @secrets accessToken, refreshToken (encrypted spenc:v1:)
+/// @retention until expiry; purged by expired-sessions cron
 model Session {
   id                  String    @id
   shop                String
@@ -291,11 +403,14 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
+/// @privacy operational-metrics — order-level commerce facts without shopper identity
+/// @retention durable until store uninstall or customer redact
 model Order {
   id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   storeId                String    @db.Uuid
   shopifyOrderId         String    @db.VarChar(100)
   orderName              String    @db.VarChar(50)
+  privacyRedacted        Boolean   @default(false)
   shopifyCreatedAt       DateTime  @db.Timestamptz
   shopifyUpdatedAt       DateTime  @db.Timestamptz
   processedAt            DateTime  @db.Timestamptz
@@ -321,6 +436,7 @@ model Order {
   @@index([storeId, metricDate], map: "orders_store_metric_date_idx")
   @@index([storeId, shopifyUpdatedAt], map: "orders_store_updated_at_idx")
   @@index([storeId, isPaid, metricDate], map: "orders_store_paid_metric_date_idx")
+  @@index([storeId, privacyRedacted], map: "orders_store_privacy_redacted_idx")
   @@map("orders")
 }
 
@@ -328,6 +444,7 @@ model OrderLineItem {
   id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   storeId             String   @db.Uuid
   orderId             String   @db.Uuid
+  privacyRedacted     Boolean  @default(false)
   shopifyLineItemId   String   @db.VarChar(100)
   shopifyOrderId      String   @db.VarChar(100)
   shopifyProductId    String?  @db.VarChar(100)
@@ -394,6 +511,24 @@ model SyncJob {
   @@index([status, lockExpiresAt], map: "sync_jobs_stale_lock_idx")
   @@index([createdAt], map: "sync_jobs_created_at_idx")
   @@map("sync_jobs")
+}
+
+model WorkerInstance {
+  id              String               @id @db.VarChar(100)
+  hostname        String?              @db.VarChar(255)
+  pid             Int?
+  status          WorkerInstanceStatus @default(active)
+  startedAt       DateTime             @default(now()) @db.Timestamptz
+  lastHeartbeatAt DateTime             @default(now()) @db.Timestamptz
+  stoppedAt       DateTime?            @db.Timestamptz
+  jobsProcessed   Int                  @default(0)
+  jobsFailed      Int                  @default(0)
+  currentJobId    String?              @db.Uuid
+  version         String?              @db.VarChar(50)
+  metadata        Json                 @default("{}") @db.JsonB
+
+  @@index([status, lastHeartbeatAt], map: "worker_instances_heartbeat_idx")
+  @@map("worker_instances")
 }
 
 model StoreOnboarding {
@@ -565,19 +700,23 @@ model MicrosoftClarityIntegration {
   @@map("microsoft_clarity_integrations")
 }
 
+/// @privacy customer-data — GDPR export artifact keyed by Shopify customer ID
+/// @retention 30 days (expiresAt); purged by privacy-retention cron
 model CustomerDataExport {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  storeId           String   @db.Uuid
-  shopifyCustomerId String   @db.VarChar(100)
-  dataRequestId     String?  @db.VarChar(100)
-  shopifyWebhookId  String   @db.VarChar(255)
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String    @db.Uuid
+  shopifyCustomerId String    @db.VarChar(100)
+  dataRequestId     String?   @db.VarChar(100)
+  shopifyWebhookId  String    @db.VarChar(255)
   exportPayload     Json
-  createdAt         DateTime @default(now()) @db.Timestamptz
+  expiresAt         DateTime? @db.Timestamptz
+  createdAt         DateTime  @default(now()) @db.Timestamptz
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([storeId, shopifyWebhookId], map: "customer_data_exports_store_webhook_unique")
   @@index([storeId, shopifyCustomerId], map: "customer_data_exports_store_customer_idx")
+  @@index([expiresAt], map: "customer_data_exports_expires_at_idx")
   @@map("customer_data_exports")
 }
 
@@ -750,4 +889,2197 @@ model AiResultCacheEntry {
   @@unique([storeId, agentId, subjectKey, inputFingerprint], map: "ai_result_cache_unique")
   @@index([storeId, agentId, subjectKey], map: "ai_result_cache_store_agent_subject_idx")
   @@map("ai_result_cache_entries")
+}
+
+model AiCostLedger {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String   @db.Uuid
+  merchantId       String?  @db.Uuid
+  agentId          String?  @db.VarChar(100)
+  feature          String   @db.VarChar(100)
+  providerId       String   @db.VarChar(50)
+  modelId          String   @db.VarChar(100)
+  modelTier        String   @db.VarChar(50)
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  latencyMs        Int      @default(0)
+  estimatedCostUsd Decimal  @default(0) @db.Decimal(12, 6)
+  cacheHit         Boolean  @default(false)
+  success          Boolean  @default(true)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storeId, createdAt], map: "ai_cost_ledger_store_created_idx")
+  @@index([storeId, feature, createdAt], map: "ai_cost_ledger_store_feature_created_idx")
+  @@map("ai_cost_ledger")
+}
+
+model AiMerchantBudget {
+  storeId          String   @id @db.Uuid
+  monthlyBudgetUsd Decimal  @default(100) @db.Decimal(12, 2)
+  softLimitPercent Int      @default(80)
+  hardLimitPercent Int      @default(100)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("ai_merchant_budgets")
+}
+
+enum EvidenceEntityType {
+  Product
+  Variant
+  Collection
+  Order
+  Refund
+  Location
+  Vendor
+  Inventory
+}
+
+enum KnowledgeIntelligenceDomain {
+  product_intelligence
+  inventory_intelligence
+  pricing_intelligence
+  operations_intelligence
+  executive_coo
+}
+
+enum KnowledgeSyncMode {
+  initial_import
+  incremental
+  manual_rebuild
+  evidence_refresh
+  fact_refresh
+  webhook_resume
+}
+
+enum EvidenceChangeType {
+  created
+  updated
+  expired
+}
+
+model Evidence {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String             @db.Uuid
+  entity            EvidenceEntityType
+  entityId          String             @db.VarChar(100)
+  factType          String             @db.VarChar(100)
+  value             Json?              @db.JsonB
+  sourceId          String?            @db.Uuid
+  confidence        Decimal            @default(1) @db.Decimal(5, 4)
+  freshnessMinutes  Int?
+  completeness      Decimal?           @db.Decimal(5, 4)
+  reliability       Decimal?           @db.Decimal(5, 4)
+  observationCount  Int                @default(1)
+  sourcePriority    Int                @default(100)
+  observedAt        DateTime           @db.Timestamptz
+  lastUpdated       DateTime           @updatedAt @db.Timestamptz
+  version           Int                @default(1)
+  active            Boolean            @default(true)
+  createdAt         DateTime           @default(now()) @db.Timestamptz
+
+  store        Store              @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  source       EvidenceSource?    @relation(fields: [sourceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  observations EvidenceObservation[]
+  history      EvidenceHistory[]
+  relationshipsFrom EvidenceRelationship[] @relation("EvidenceFrom")
+  relationshipsTo   EvidenceRelationship[] @relation("EvidenceTo")
+  graphNodes        KnowledgeGraphNode[]
+  graphEdges        KnowledgeGraphEdge[]
+  graphRelationships KnowledgeGraphRelationship[]
+
+  @@unique([storeId, entity, entityId, factType], map: "evidence_store_entity_fact_unique")
+  @@index([storeId, factType], map: "evidence_store_fact_type_idx")
+  @@index([storeId, entity, entityId], map: "evidence_store_entity_idx")
+  @@index([storeId, active, lastUpdated], map: "evidence_store_active_updated_idx")
+  @@map("evidence")
+}
+
+model EvidenceHistory {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  evidenceId  String             @db.Uuid
+  storeId     String             @db.Uuid
+  changeType  EvidenceChangeType
+  snapshot    Json               @db.JsonB
+  changedAt   DateTime           @default(now()) @db.Timestamptz
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "evidence_history_store_changed_idx")
+  @@index([evidenceId, changedAt], map: "evidence_history_evidence_changed_idx")
+  @@map("evidence_history")
+}
+
+model EvidenceSource {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId    String   @db.Uuid
+  sourceType String   @db.VarChar(50)
+  sourceRef  String   @db.VarChar(100)
+  priority   Int      @default(100)
+  lastSyncAt DateTime? @db.Timestamptz
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  updatedAt  DateTime @updatedAt @db.Timestamptz
+
+  store     Store      @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  evidence  Evidence[]
+
+  @@unique([storeId, sourceType, sourceRef], map: "evidence_source_store_ref_unique")
+  @@map("evidence_sources")
+}
+
+model EvidenceRelationship {
+  id               String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String @db.Uuid
+  fromEvidenceId   String @db.Uuid
+  toEvidenceId     String @db.Uuid
+  relationshipType String @db.VarChar(100)
+
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fromEvidence Evidence @relation("EvidenceFrom", fields: [fromEvidenceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  toEvidence   Evidence @relation("EvidenceTo", fields: [toEvidenceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, fromEvidenceId, toEvidenceId, relationshipType], map: "evidence_relationship_unique")
+  @@map("evidence_relationships")
+}
+
+model EvidenceObservation {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  evidenceId String   @db.Uuid
+  storeId    String   @db.Uuid
+  observedAt DateTime @db.Timestamptz
+  value      Json?    @db.JsonB
+  sourceId   String?  @db.Uuid
+  dedupeKey  String   @db.VarChar(255)
+
+  evidence Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([storeId, dedupeKey], map: "evidence_observation_dedupe_unique")
+  @@index([evidenceId, observedAt], map: "evidence_observation_evidence_observed_idx")
+  @@map("evidence_observations")
+}
+
+model KnowledgeSyncCheckpoint {
+  storeId           String            @id @db.Uuid
+  syncMode          KnowledgeSyncMode @default(initial_import)
+  status            String            @default("idle") @db.VarChar(50)
+  productCursor     String?           @db.Text
+  orderCursor       String?           @db.Text
+  inventoryCursor   String?           @db.Text
+  collectionCursor  String?           @db.Text
+  lastSyncAt        DateTime?         @db.Timestamptz
+  checkpointJson    Json              @default("{}") @db.JsonB
+  productsProcessed Int               @default(0)
+  ordersProcessed   Int               @default(0)
+  evidenceCreated   Int               @default(0)
+  createdAt         DateTime          @default(now()) @db.Timestamptz
+  updatedAt         DateTime          @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_sync_checkpoints")
+}
+
+model KnowledgeReadiness {
+  storeId                       String   @id @db.Uuid
+  productIntelligencePercent    Int      @default(0)
+  inventoryIntelligencePercent  Int      @default(0)
+  pricingIntelligencePercent    Int      @default(0)
+  operationsIntelligencePercent Int      @default(0)
+  executiveCooPercent           Int      @default(0)
+  overallPercent                Int      @default(0)
+  lastComputedAt                DateTime @default(now()) @db.Timestamptz
+  createdAt                     DateTime @default(now()) @db.Timestamptz
+  updatedAt                     DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_readiness")
+}
+
+enum StoreSizeTier {
+  tiny
+  small
+  medium
+  large
+  enterprise
+}
+
+enum LearningStage {
+  initializing
+  historical_import
+  learning
+  operational
+  predictive
+  adaptive
+}
+
+enum LearningVelocityTier {
+  fast
+  medium
+  slow
+}
+
+enum LearningDomain {
+  inventory
+  products
+  pricing
+  seo
+  collections
+  operations
+  seasonality
+  vendor_reliability
+  refund_behaviour
+  elasticity
+  executive_coo
+  prediction
+}
+
+enum LearningPriorityDomain {
+  revenue
+  inventory
+  profitability
+  pricing
+  seo
+  collections
+  media
+  operations
+  seasonality
+}
+
+model StoreLearningProfile {
+  storeId                        String        @id @db.Uuid
+  storeSize                      StoreSizeTier @default(small)
+  productsCount                  Int           @default(0)
+  variantsCount                  Int           @default(0)
+  collectionsCount               Int           @default(0)
+  ordersCount                    Int           @default(0)
+  inventoryItemsCount            Int           @default(0)
+  locationsCount                 Int           @default(0)
+  vendorsCount                   Int           @default(0)
+  uniqueTagsCount                Int           @default(0)
+  averageVariantsPerProduct      Decimal       @default(0) @db.Decimal(8, 2)
+  catalogComplexityScore         Decimal       @default(0) @db.Decimal(5, 4)
+  historicalDepthScore           Decimal       @default(0) @db.Decimal(5, 4)
+  operationalComplexityScore     Decimal       @default(0) @db.Decimal(5, 4)
+  estimatedHistoryMonths         Int           @default(0)
+  storeAgeDays                   Int           @default(0)
+  oldestOrderAt                  DateTime?     @db.Timestamptz
+  newestOrderAt                  DateTime?     @db.Timestamptz
+  expectedLearningDurationMinutes Int          @default(0)
+  workerEstimateMinutes          Int           @default(0)
+  futureAiCostEstimateUsd        Decimal?      @db.Decimal(10, 4)
+  bootstrapStatus                String        @default("pending") @db.VarChar(50)
+  profileJson                    Json          @default("{}") @db.JsonB
+  profiledAt                     DateTime?     @db.Timestamptz
+  createdAt                      DateTime      @default(now()) @db.Timestamptz
+  updatedAt                      DateTime      @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("store_learning_profile")
+}
+
+model LearningReadiness {
+  storeId                  String        @id @db.Uuid
+  stage                    LearningStage @default(initializing)
+  overallConfidencePercent Int           @default(0)
+  inventoryConfidence      Int           @default(0)
+  productsConfidence       Int           @default(0)
+  pricingConfidence        Int           @default(0)
+  seoConfidence            Int           @default(0)
+  collectionsConfidence    Int           @default(0)
+  operationsConfidence     Int           @default(0)
+  seasonalityConfidence    Int           @default(0)
+  executiveCooReady        Boolean       @default(false)
+  predictionReady          Boolean       @default(false)
+  experimentReady          Boolean       @default(false)
+  merchantIntelligenceReady Boolean      @default(false)
+  merchantMessage          String        @default("") @db.VarChar(500)
+  stageExplanation         String        @default("") @db.VarChar(500)
+  stageStartedAt           DateTime      @default(now()) @db.Timestamptz
+  lastComputedAt           DateTime      @default(now()) @db.Timestamptz
+  createdAt                DateTime      @default(now()) @db.Timestamptz
+  updatedAt                DateTime      @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("learning_readiness")
+}
+
+model LearningVelocity {
+  id          String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String               @db.Uuid
+  domain      LearningDomain
+  velocity    LearningVelocityTier
+  statusLabel String               @default("Learning") @db.VarChar(50)
+  createdAt   DateTime             @default(now()) @db.Timestamptz
+  updatedAt   DateTime             @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, domain], map: "learning_velocity_store_domain_unique")
+  @@map("learning_velocity")
+}
+
+model LearningEta {
+  storeId                   String    @id @db.Uuid
+  bootstrapDurationMinutes    Int       @default(0)
+  historicalImportMinutes     Int       @default(0)
+  graphBuildMinutes           Int       @default(0)
+  quickWinMinutes             Int       @default(0)
+  totalEstimatedMinutes       Int       @default(0)
+  estimatedCompletionAt       DateTime? @db.Timestamptz
+  historyMonthsDisplay        Int       @default(12)
+  merchantHeadline            String    @default("") @db.VarChar(500)
+  lastComputedAt              DateTime  @default(now()) @db.Timestamptz
+  createdAt                   DateTime  @default(now()) @db.Timestamptz
+  updatedAt                   DateTime  @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("learning_eta")
+}
+
+model LearningPriority {
+  id            String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String                 @db.Uuid
+  domain        LearningPriorityDomain
+  priorityOrder Int
+  createdAt     DateTime               @default(now()) @db.Timestamptz
+  updatedAt     DateTime               @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, domain], map: "learning_priority_store_domain_unique")
+  @@index([storeId, priorityOrder], map: "learning_priority_store_order_idx")
+  @@map("learning_priorities")
+}
+
+enum MerchantBaselineType {
+  revenue
+  pricing
+  inventory
+  category
+  vendor
+  seasonality
+  refund
+  growth
+  operational
+}
+
+enum PatternSeedType {
+  weekend_sales_lift
+  high_refund_rate
+  inventory_pressure
+  seasonal_candidate
+  pricing_volatility
+  category_concentration
+  vendor_concentration
+  order_growth
+}
+
+model HistoricalMemory {
+  storeId           String   @id @db.Uuid
+  version           Int      @default(1)
+  memoryJson        Json     @default("{}") @db.JsonB
+  evidenceCount     Int      @default(0)
+  graphVersion      Int?
+  patternSeedCount  Int      @default(0)
+  baselineCount     Int      @default(0)
+  confidenceScore   Decimal  @default(0) @db.Decimal(5, 4)
+  lastBuiltAt       DateTime @default(now()) @db.Timestamptz
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("historical_memory")
+}
+
+model HistoricalSnapshot {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String   @db.Uuid
+  versionNumber    Int
+  snapshotHash     String   @db.VarChar(64)
+  memorySnapshot   Json     @db.JsonB
+  baselineSnapshot Json     @db.JsonB
+  patternSnapshot  Json     @db.JsonB
+  graphVersion     Int?
+  immutable        Boolean  @default(true)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, versionNumber], map: "historical_snapshot_store_version_unique")
+  @@map("historical_snapshots")
+}
+
+model PatternSeed {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String          @db.Uuid
+  patternType      PatternSeedType
+  semanticLabel    String          @db.VarChar(150)
+  patternJson      Json            @default("{}") @db.JsonB
+  confidence       Decimal         @default(0) @db.Decimal(5, 4)
+  observationCount Int             @default(1)
+  evidenceIds      Json            @default("[]") @db.JsonB
+  active           Boolean         @default(true)
+  createdAt        DateTime        @default(now()) @db.Timestamptz
+  updatedAt        DateTime        @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, patternType, semanticLabel], map: "pattern_seed_unique")
+  @@index([storeId, active], map: "pattern_seed_store_active_idx")
+  @@map("pattern_seeds")
+}
+
+model ConfidenceSeed {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String   @db.Uuid
+  domain            String   @db.VarChar(100)
+  confidencePercent Int      @default(0)
+  baselinePercent   Int      @default(0)
+  evidenceCoverage  Decimal  @default(0) @db.Decimal(5, 4)
+  graphCoverage     Decimal  @default(0) @db.Decimal(5, 4)
+  source            String   @default("historical_import") @db.VarChar(100)
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, domain], map: "confidence_seed_store_domain_unique")
+  @@map("confidence_seeds")
+}
+
+model MerchantBaseline {
+  id           String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String               @db.Uuid
+  baselineType MerchantBaselineType
+  baselineJson Json                 @default("{}") @db.JsonB
+  confidence   Decimal              @default(0) @db.Decimal(5, 4)
+  computedAt   DateTime             @default(now()) @db.Timestamptz
+  createdAt    DateTime             @default(now()) @db.Timestamptz
+  updatedAt    DateTime             @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, baselineType], map: "merchant_baseline_store_type_unique")
+  @@map("merchant_baselines")
+}
+
+model BusinessDnaVersion {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  versionNumber   Int
+  dnaJson         Json     @db.JsonB
+  graphVersion    Int?
+  confidenceScore Decimal  @default(0) @db.Decimal(5, 4)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, versionNumber], map: "business_dna_version_store_unique")
+  @@map("business_dna_versions")
+}
+
+enum QuickWinCategory {
+  inventory
+  seo
+  pricing
+  collections
+  operations
+  catalog
+}
+
+enum QuickWinType {
+  inventory_risk
+  missing_seo
+  missing_meta_description
+  missing_alt_text
+  dead_product
+  never_sold_product
+  low_stock
+  overstock
+  bundle_candidate
+  pricing_outlier
+  collection_issue
+  draft_too_long
+  no_images
+  no_description
+  margin_risk
+  slow_moving_product
+  inactive_product
+  high_refund_risk
+  out_of_stock
+}
+
+model QuickWin {
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId             String           @db.Uuid
+  winType             QuickWinType
+  category            QuickWinCategory
+  title               String           @db.VarChar(300)
+  description         String           @db.VarChar(500)
+  affectedCount       Int              @default(0)
+  businessImpact      Int              @default(0)
+  estimatedEffort     Int              @default(2)
+  confidence          Decimal          @default(0) @db.Decimal(5, 4)
+  revenueOpportunity  Decimal          @default(0) @db.Decimal(12, 2)
+  urgency             Int              @default(0)
+  rankScore           Decimal          @default(0) @db.Decimal(10, 4)
+  evidenceIds         Json             @default("[]") @db.JsonB
+  sourceFactTypes     Json             @default("[]") @db.JsonB
+  metadata            Json             @default("{}") @db.JsonB
+  active              Boolean          @default(true)
+  createdAt           DateTime         @default(now()) @db.Timestamptz
+  updatedAt           DateTime         @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, winType], map: "quick_win_store_type_unique")
+  @@index([storeId, active, rankScore], map: "quick_win_store_rank_idx")
+  @@map("quick_wins")
+}
+
+model QuickWinSummary {
+  storeId                     String   @id @db.Uuid
+  totalWins                   Int      @default(0)
+  estimatedRevenueOpportunity Decimal  @default(0) @db.Decimal(12, 2)
+  topCategories               Json     @default("[]") @db.JsonB
+  headline                    String   @default("") @db.VarChar(500)
+  lastGeneratedAt             DateTime @default(now()) @db.Timestamptz
+  createdAt                   DateTime @default(now()) @db.Timestamptz
+  updatedAt                   DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("quick_win_summary")
+}
+
+enum ExecutiveDecisionCategory {
+  support
+  inventory
+  pricing
+  seo
+  collections
+  operations
+  growth
+  risk
+  bundles
+  catalog
+  automation
+  performance
+  infrastructure
+  merchant_experience
+}
+
+enum ExecutiveDecisionSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+enum DecisionTaskStatus {
+  pending
+  approved
+  in_progress
+  completed
+  ignored
+  deferred
+  cancelled
+}
+
+enum ExecutiveSourceEngine {
+  quick_wins
+  pattern_discovery
+  historical_intelligence
+  knowledge_graph
+  merchant_baseline
+  decision_engine
+}
+
+model ExecutiveDecision {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                 String                    @db.Uuid
+  decisionKey             String                    @db.VarChar(120)
+  title                   String                    @db.VarChar(300)
+  category                ExecutiveDecisionCategory
+  severity                ExecutiveDecisionSeverity @default(medium)
+  priority                Int                       @default(0)
+  businessImpact          Int                       @default(0)
+  confidence              Decimal                   @default(0) @db.Decimal(5, 4)
+  urgency                 Int                       @default(0)
+  estimatedRevenueImpact  Decimal                   @default(0) @db.Decimal(12, 2)
+  estimatedProfitImpact   Decimal                   @default(0) @db.Decimal(12, 2)
+  estimatedEffort         Int                       @default(2)
+  estimatedTimeMinutes    Int                       @default(30)
+  recommendation          String                    @db.VarChar(200)
+  evidenceIds             Json                      @default("[]") @db.JsonB
+  graphNodeIds            Json                      @default("[]") @db.JsonB
+  relatedProducts         Json                      @default("[]") @db.JsonB
+  relatedCollections      Json                      @default("[]") @db.JsonB
+  relatedVendors          Json                      @default("[]") @db.JsonB
+  businessMemoryIds       Json                      @default("[]") @db.JsonB
+  historicalContext       Json                      @default("{}") @db.JsonB
+  sourceEngine            ExecutiveSourceEngine
+  rankScore               Decimal                   @default(0) @db.Decimal(10, 4)
+  active                  Boolean                   @default(true)
+  generatedAt             DateTime                  @default(now()) @db.Timestamptz
+  createdAt               DateTime                  @default(now()) @db.Timestamptz
+  updatedAt               DateTime                  @updatedAt @db.Timestamptz
+
+  store          Store           @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  tasks          DecisionTask[]
+  history        DecisionHistory[]
+  decisionScores DecisionScore[]
+
+  @@unique([storeId, decisionKey], map: "executive_decision_store_key_unique")
+  @@index([storeId, active, rankScore], map: "executive_decision_store_rank_idx")
+  @@map("executive_decisions")
+}
+
+model DecisionTask {
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId             String             @db.Uuid
+  decisionId          String             @db.Uuid
+  title               String             @db.VarChar(300)
+  description         String             @db.VarChar(500)
+  reason              String             @db.VarChar(500)
+  status              DecisionTaskStatus @default(pending)
+  evidenceIds         Json               @default("[]") @db.JsonB
+  graphNodeIds        Json               @default("[]") @db.JsonB
+  businessMemoryIds   Json               @default("[]") @db.JsonB
+  businessImpact      Int                @default(0)
+  estimatedEffort     Int                @default(2)
+  estimatedTimeMinutes Int               @default(30)
+  confidence          Decimal            @default(0) @db.Decimal(5, 4)
+  outcomeJson         Json               @default("{}") @db.JsonB
+  createdAt           DateTime           @default(now()) @db.Timestamptz
+  updatedAt           DateTime           @updatedAt @db.Timestamptz
+
+  store    Store             @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  decision ExecutiveDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, status], map: "decision_task_store_status_idx")
+  @@map("decision_tasks")
+}
+
+model DecisionHistory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String   @db.Uuid
+  decisionId  String   @db.Uuid
+  changeType  String   @db.VarChar(50)
+  snapshot    Json     @db.JsonB
+  changedAt   DateTime @default(now()) @db.Timestamptz
+
+  store    Store             @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  decision ExecutiveDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "decision_history_store_changed_idx")
+  @@map("decision_history")
+}
+
+model ExecutiveBriefing {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  briefingDate    String   @db.VarChar(10)
+  headline        String   @db.VarChar(500)
+  briefingJson    Json     @db.JsonB
+  contextSnapshotId String? @db.Uuid
+  generatedBy     String   @default("deterministic") @db.VarChar(50)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, briefingDate], map: "executive_briefing_store_date_unique")
+  @@map("executive_briefings")
+}
+
+model DailyOperatingPlan {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                   String   @db.Uuid
+  planDate                  String   @db.VarChar(10)
+  estimatedCompletionMinutes Int     @default(0)
+  estimatedRevenueOpportunity Decimal @default(0) @db.Decimal(12, 2)
+  estimatedProfitOpportunity  Decimal @default(0) @db.Decimal(12, 2)
+  taskCount                 Int      @default(0)
+  planJson                  Json     @db.JsonB
+  contextSnapshotId         String?  @db.Uuid
+  generatedBy               String   @default("deterministic") @db.VarChar(50)
+  createdAt                 DateTime @default(now()) @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, planDate], map: "daily_operating_plan_store_date_unique")
+  @@map("daily_operating_plans")
+}
+
+model OperationalReadiness {
+  storeId                   String   @id @db.Uuid
+  score                     Int      @default(0)
+  inventoryScore            Int      @default(0)
+  pricingScore              Int      @default(0)
+  seoScore                  Int      @default(0)
+  collectionsScore          Int      @default(0)
+  automationScore           Int      @default(0)
+  operationalRiskScore      Int      @default(0)
+  executionCapacityScore    Int      @default(0)
+  knowledgeConfidenceScore  Int      @default(0)
+  historicalStabilityScore  Int      @default(0)
+  predictionReadinessScore  Int      @default(0)
+  scoreJson                 Json     @default("{}") @db.JsonB
+  lastComputedAt            DateTime @default(now()) @db.Timestamptz
+  createdAt                 DateTime @default(now()) @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("operational_readiness")
+}
+
+model DecisionScore {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String   @db.Uuid
+  decisionId  String   @db.Uuid
+  scoreType   String   @db.VarChar(50)
+  scoreValue  Decimal  @default(0) @db.Decimal(10, 4)
+  scoreJson   Json     @default("{}") @db.JsonB
+  computedAt  DateTime @default(now()) @db.Timestamptz
+
+  store    Store             @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  decision ExecutiveDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "decision_score_store_computed_idx")
+  @@map("decision_scores")
+}
+
+model BusinessContextSnapshot {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String   @db.Uuid
+  versionNumber Int      @default(1)
+  contextJson   Json     @db.JsonB
+  contextHash   String   @db.VarChar(64)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, createdAt], map: "business_context_snapshot_store_created_idx")
+  @@map("business_context_snapshots")
+}
+
+enum BusinessOutcomeType {
+  revenue_decrease
+  revenue_increase
+  conversion_decrease
+  conversion_increase
+  inventory_shortage
+  refund_spike
+  traffic_loss
+  organic_ranking_loss
+  checkout_abandonment
+  cart_abandonment
+  low_inventory_turnover
+  pricing_anomaly
+  seo_degradation
+  collection_underperformance
+  slow_moving_products
+  bundle_failure
+  store_speed_degradation
+  operational_bottleneck
+  automation_failure
+}
+
+enum CausalRelationType {
+  positive
+  negative
+  inverse
+  temporal
+  cross_domain
+}
+
+enum RootCauseSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+model RootCause {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId              String              @db.Uuid
+  causeKey             String              @db.VarChar(120)
+  businessOutcome      BusinessOutcomeType
+  primaryCause         String              @db.VarChar(300)
+  secondaryCauses      Json                @default("[]") @db.JsonB
+  contributingFactors  Json                @default("[]") @db.JsonB
+  confidence           Decimal             @default(0) @db.Decimal(5, 4)
+  evidenceIds          Json                @default("[]") @db.JsonB
+  graphNodeIds         Json                @default("[]") @db.JsonB
+  businessMemoryIds    Json                @default("[]") @db.JsonB
+  quickWinIds          Json                @default("[]") @db.JsonB
+  merchantBaselineIds  Json                @default("[]") @db.JsonB
+  causalChain          Json                @default("[]") @db.JsonB
+  timeline             Json                @default("[]") @db.JsonB
+  historicalSupport    Json                @default("{}") @db.JsonB
+  impactEstimate       Json                @default("{}") @db.JsonB
+  severity             RootCauseSeverity   @default(medium)
+  urgency              Int                 @default(0)
+  rankScore            Decimal             @default(0) @db.Decimal(10, 4)
+  active               Boolean             @default(true)
+  generatedAt          DateTime            @default(now()) @db.Timestamptz
+  createdAt            DateTime            @default(now()) @db.Timestamptz
+  updatedAt            DateTime            @updatedAt @db.Timestamptz
+
+  store            Store              @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  chains           CausalChain[]
+  timelines        CausalTimeline[]
+  confidences      CauseConfidence[]
+  impacts          ImpactAssessment[]
+  history          RootCauseHistory[]
+
+  @@unique([storeId, causeKey], map: "root_cause_store_key_unique")
+  @@index([storeId, active, rankScore], map: "root_cause_store_rank_idx")
+  @@map("root_causes")
+}
+
+model CausalChain {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String   @db.Uuid
+  rootCauseId   String   @db.Uuid
+  chainKey      String   @db.VarChar(120)
+  chainJson     Json     @db.JsonB
+  evidenceIds   Json     @default("[]") @db.JsonB
+  confidence    Decimal  @default(0) @db.Decimal(5, 4)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rootCause RootCause @relation(fields: [rootCauseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, chainKey], map: "causal_chain_store_key_unique")
+  @@map("causal_chains")
+}
+
+model CausalTimeline {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String   @db.Uuid
+  rootCauseId   String   @db.Uuid
+  timelineKey   String   @db.VarChar(120)
+  eventsJson    Json     @db.JsonB
+  confidence    Decimal  @default(0) @db.Decimal(5, 4)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rootCause RootCause @relation(fields: [rootCauseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, timelineKey], map: "causal_timeline_store_key_unique")
+  @@map("causal_timelines")
+}
+
+model SignalCorrelation {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String             @db.Uuid
+  correlationKey  String             @db.VarChar(120)
+  signalA         String             @db.VarChar(100)
+  signalB         String             @db.VarChar(100)
+  relationType    CausalRelationType
+  strength        Decimal            @default(0) @db.Decimal(5, 4)
+  evidenceIds     Json               @default("[]") @db.JsonB
+  correlationJson Json               @default("{}") @db.JsonB
+  computedAt      DateTime           @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, correlationKey], map: "signal_correlation_store_key_unique")
+  @@index([storeId, computedAt], map: "signal_correlation_store_computed_idx")
+  @@map("signal_correlations")
+}
+
+model CauseConfidence {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  rootCauseId     String   @db.Uuid
+  confidenceScore Decimal  @default(0) @db.Decimal(5, 4)
+  evidenceCount   Int      @default(0)
+  graphSupport    Decimal  @default(0) @db.Decimal(5, 4)
+  historicalSupport Decimal @default(0) @db.Decimal(5, 4)
+  freshness       Decimal  @default(0) @db.Decimal(5, 4)
+  crossSourceAgreement Decimal @default(0) @db.Decimal(5, 4)
+  confidenceJson  Json     @default("{}") @db.JsonB
+  computedAt      DateTime @default(now()) @db.Timestamptz
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rootCause RootCause @relation(fields: [rootCauseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "cause_confidence_store_computed_idx")
+  @@map("cause_confidences")
+}
+
+model ImpactAssessment {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  rootCauseId     String   @db.Uuid
+  revenueImpact   Decimal  @default(0) @db.Decimal(12, 2)
+  profitImpact    Decimal  @default(0) @db.Decimal(12, 2)
+  operationalImpact Int    @default(0)
+  customerImpact  Int      @default(0)
+  urgency         Int      @default(0)
+  impactJson      Json     @default("{}") @db.JsonB
+  computedAt      DateTime @default(now()) @db.Timestamptz
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rootCause RootCause @relation(fields: [rootCauseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "impact_assessment_store_computed_idx")
+  @@map("impact_assessments")
+}
+
+model CausalGraphEdge {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  edgeKey         String   @db.VarChar(120)
+  fromNodeId      String   @db.VarChar(100)
+  toNodeId        String   @db.VarChar(100)
+  relationLabel   String   @db.VarChar(100)
+  evidenceIds     Json     @default("[]") @db.JsonB
+  edgeJson        Json     @default("{}") @db.JsonB
+  confidence      Decimal  @default(0) @db.Decimal(5, 4)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, edgeKey], map: "causal_graph_edge_store_key_unique")
+  @@map("causal_graph_edges")
+}
+
+model RootCauseHistory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String   @db.Uuid
+  rootCauseId String   @db.Uuid
+  changeType  String   @db.VarChar(50)
+  snapshot    Json     @db.JsonB
+  changedAt   DateTime @default(now()) @db.Timestamptz
+
+  store     Store     @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  rootCause RootCause @relation(fields: [rootCauseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "root_cause_history_store_changed_idx")
+  @@map("root_cause_history")
+}
+
+enum PredictionType {
+  inventory_stockout
+  revenue_forecast
+  seo_traffic_decline
+  pricing_margin_risk
+  refund_increase
+  collection_inactive
+  operational_supplier_delay
+}
+
+enum ForecastWindow {
+  days_4
+  days_7
+  days_12
+  days_30
+  next_week
+}
+
+enum PreventionActionType {
+  restock
+  fix_metadata
+  review_product
+  adjust_pricing
+  refresh_collection
+  review_supplier
+  monitor_trend
+}
+
+model Prediction {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String         @db.Uuid
+  predictionKey         String         @db.VarChar(120)
+  predictionType        PredictionType
+  title                 String         @db.VarChar(300)
+  description           String         @db.VarChar(500)
+  forecastWindow        ForecastWindow @default(days_7)
+  predictedOutcome      String         @db.VarChar(300)
+  predictedValue        Decimal?       @db.Decimal(12, 4)
+  predictedUnit         String         @default("") @db.VarChar(50)
+  confidence            Decimal        @default(0) @db.Decimal(5, 4)
+  contributingSignals   Json           @default("[]") @db.JsonB
+  historicalSupport     Json           @default("{}") @db.JsonB
+  evidenceIds           Json           @default("[]") @db.JsonB
+  graphNodeIds          Json           @default("[]") @db.JsonB
+  timelineIds           Json           @default("[]") @db.JsonB
+  rootCauseIds          Json           @default("[]") @db.JsonB
+  expectedBusinessImpact Decimal       @default(0) @db.Decimal(12, 2)
+  rankScore             Decimal        @default(0) @db.Decimal(10, 4)
+  active                Boolean        @default(true)
+  generatedAt           DateTime       @default(now()) @db.Timestamptz
+  createdAt               DateTime       @default(now()) @db.Timestamptz
+  updatedAt               DateTime       @updatedAt @db.Timestamptz
+
+  store               Store                 @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  confidences         PredictionConfidence[]
+  preventionActions   PreventionAction[]
+  history             PredictionHistory[]
+  riskAssessments     RiskAssessment[]
+
+  @@unique([storeId, predictionKey], map: "prediction_store_key_unique")
+  @@index([storeId, active, rankScore], map: "prediction_store_rank_idx")
+  @@map("predictions")
+}
+
+model PredictionHistory {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  predictionId String   @db.Uuid
+  changeType   String   @db.VarChar(50)
+  snapshot     Json     @db.JsonB
+  changedAt    DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "prediction_history_store_changed_idx")
+  @@map("prediction_history")
+}
+
+model PredictionConfidence {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId              String   @db.Uuid
+  predictionId         String   @db.Uuid
+  confidenceScore      Decimal  @default(0) @db.Decimal(5, 4)
+  signalStrength       Decimal  @default(0) @db.Decimal(5, 4)
+  historicalSupport    Decimal  @default(0) @db.Decimal(5, 4)
+  timelineSupport      Decimal  @default(0) @db.Decimal(5, 4)
+  rootCauseSupport     Decimal  @default(0) @db.Decimal(5, 4)
+  forecastModelSupport Decimal  @default(0) @db.Decimal(5, 4)
+  confidenceJson       Json     @default("{}") @db.JsonB
+  computedAt           DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "prediction_confidence_store_computed_idx")
+  @@map("prediction_confidences")
+}
+
+model ForecastModel {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  modelKey     String   @db.VarChar(120)
+  modelType    String   @db.VarChar(100)
+  modelJson    Json     @db.JsonB
+  version      Int      @default(1)
+  computedAt   DateTime @default(now()) @db.Timestamptz
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, modelKey], map: "forecast_model_store_key_unique")
+  @@map("forecast_models")
+}
+
+model ForecastSnapshot {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  snapshotKey     String   @db.VarChar(120)
+  snapshotJson    Json     @db.JsonB
+  versionNumber   Int      @default(1)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, snapshotKey], map: "forecast_snapshot_store_key_unique")
+  @@index([storeId, createdAt], map: "forecast_snapshot_store_created_idx")
+  @@map("forecast_snapshots")
+}
+
+model PreventionAction {
+  id                      String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                 String               @db.Uuid
+  predictionId            String               @db.Uuid
+  actionKey               String               @db.VarChar(120)
+  actionType              PreventionActionType
+  title                   String               @db.VarChar(300)
+  description             String               @db.VarChar(500)
+  recommendedAction       String               @db.VarChar(300)
+  expectedImpactProtected Decimal              @default(0) @db.Decimal(12, 2)
+  expectedPreventionPct   Decimal              @default(0) @db.Decimal(5, 2)
+  estimatedEffort         Int                  @default(2)
+  estimatedTimeMinutes    Int                  @default(30)
+  confidence              Decimal              @default(0) @db.Decimal(5, 4)
+  evidenceIds             Json                 @default("[]") @db.JsonB
+  active                  Boolean              @default(true)
+  createdAt               DateTime             @default(now()) @db.Timestamptz
+  updatedAt               DateTime             @updatedAt @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, actionKey], map: "prevention_action_store_key_unique")
+  @@index([storeId, active], map: "prevention_action_store_active_idx")
+  @@map("prevention_actions")
+}
+
+model RiskAssessment {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  predictionId String?  @db.Uuid
+  riskType     String   @db.VarChar(100)
+  riskScore    Int      @default(0)
+  riskJson     Json     @default("{}") @db.JsonB
+  computedAt   DateTime @default(now()) @db.Timestamptz
+
+  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  prediction Prediction? @relation(fields: [predictionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "risk_assessment_store_computed_idx")
+  @@map("risk_assessments")
+}
+
+model ForecastAccuracy {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  predictionType  PredictionType
+  predictedValue  Decimal  @db.Decimal(12, 4)
+  actualValue     Decimal? @db.Decimal(12, 4)
+  accuracyScore   Decimal  @default(0) @db.Decimal(5, 4)
+  evaluatedAt     DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, evaluatedAt], map: "forecast_accuracy_store_evaluated_idx")
+  @@map("forecast_accuracy")
+}
+
+model BusinessStability {
+  storeId                   String   @id @db.Uuid
+  score                     Int      @default(0)
+  forecastVolatilityScore   Int      @default(0)
+  inventoryRiskScore        Int      @default(0)
+  revenueStabilityScore     Int      @default(0)
+  supplierReliabilityScore  Int      @default(0)
+  seasonalUncertaintyScore  Int      @default(0)
+  pricingStabilityScore     Int      @default(0)
+  trafficConsistencyScore   Int      @default(0)
+  scoreJson                 Json     @default("{}") @db.JsonB
+  lastComputedAt            DateTime @default(now()) @db.Timestamptz
+  createdAt                 DateTime @default(now()) @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("business_stability")
+}
+
+enum ExperimentDomain {
+  pricing
+  seo
+  bundles
+  inventory
+  merchandising
+  collections
+  content
+  operations
+}
+
+enum ExperimentStatus {
+  suggested
+  shadow_simulated
+  pending_approval
+  approved
+  running
+  completed
+  rejected
+  dismissed
+  cancelled
+  no_change
+  tie
+}
+
+enum ExperimentRiskLevel {
+  low
+  medium
+  high
+}
+
+enum ExperimentWinnerOutcome {
+  winner
+  loser
+  no_change
+  statistical_tie
+}
+
+enum ExperimentSourceType {
+  quick_win
+  root_cause
+  prediction
+  pattern
+  evidence
+}
+
+enum ExperimentEventType {
+  ExperimentStarted
+  ExperimentCompleted
+  WinnerSelected
+  ExperimentRejected
+  ExperimentCancelled
+}
+
+model Experiment {
+  id                      String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId                 String               @db.Uuid
+  experimentKey           String               @db.VarChar(120)
+  experimentDomain        ExperimentDomain
+  templateKey             String               @db.VarChar(120)
+  title                   String               @db.VarChar(300)
+  businessProblem         String               @db.VarChar(500)
+  proposedChange          String               @db.VarChar(500)
+  expectedRevenueImpact   Decimal              @default(0) @db.Decimal(12, 2)
+  expectedProfitImpact    Decimal              @default(0) @db.Decimal(12, 2)
+  confidence              Decimal              @default(0) @db.Decimal(5, 4)
+  estimatedDurationDays   Int                  @default(14)
+  merchantEffort          Int                  @default(2)
+  businessRisk            ExperimentRiskLevel  @default(medium)
+  baselineMetrics         Json                 @default("{}") @db.JsonB
+  successMetrics          Json                 @default("{}") @db.JsonB
+  evidenceIds             Json                 @default("[]") @db.JsonB
+  graphNodeIds            Json                 @default("[]") @db.JsonB
+  memoryIds               Json                 @default("[]") @db.JsonB
+  predictionIds           Json                 @default("[]") @db.JsonB
+  rootCauseIds            Json                 @default("[]") @db.JsonB
+  recommendationSource    ExperimentSourceType @default(evidence)
+  shadowSimulationJson    Json                 @default("{}") @db.JsonB
+  status                  ExperimentStatus     @default(shadow_simulated)
+  rankScore               Decimal              @default(0) @db.Decimal(10, 4)
+  active                  Boolean              @default(true)
+  generatedAt             DateTime             @default(now()) @db.Timestamptz
+  createdAt               DateTime             @default(now()) @db.Timestamptz
+  updatedAt               DateTime             @updatedAt @db.Timestamptz
+
+  store           Store                    @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  baselines       ExperimentBaseline[]
+  variants        ExperimentVariant[]
+  observations    ExperimentObservation[]
+  results         ExperimentResult[]
+  winners         ExperimentWinner[]
+  confidences     ExperimentConfidence[]
+  history         ExperimentHistory[]
+  learning        ExperimentLearning[]
+  recommendations ExperimentRecommendation[]
+
+  @@unique([storeId, experimentKey], map: "experiment_store_key_unique")
+  @@index([storeId, active, status, rankScore], map: "experiment_store_status_rank_idx")
+  @@map("experiments")
+}
+
+model ExperimentTemplate {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String           @db.Uuid
+  templateKey  String           @db.VarChar(120)
+  domain       ExperimentDomain
+  title        String           @db.VarChar(300)
+  templateJson Json             @db.JsonB
+  version      Int              @default(1)
+  active       Boolean          @default(true)
+  createdAt    DateTime         @default(now()) @db.Timestamptz
+  updatedAt    DateTime         @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, templateKey], map: "experiment_template_store_key_unique")
+  @@map("experiment_templates")
+}
+
+model ExperimentOpportunity {
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId             String               @db.Uuid
+  opportunityKey      String               @db.VarChar(120)
+  domain              ExperimentDomain
+  title               String               @db.VarChar(300)
+  businessProblem     String               @db.VarChar(500)
+  sourceType          ExperimentSourceType
+  sourceId            String               @default("") @db.VarChar(120)
+  evidenceIds         Json                 @default("[]") @db.JsonB
+  memoryIds           Json                 @default("[]") @db.JsonB
+  predictionIds       Json                 @default("[]") @db.JsonB
+  rootCauseIds        Json                 @default("[]") @db.JsonB
+  estimatedImpact     Decimal              @default(0) @db.Decimal(12, 2)
+  confidence          Decimal              @default(0) @db.Decimal(5, 4)
+  opportunityJson     Json                 @default("{}") @db.JsonB
+  active              Boolean              @default(true)
+  generatedAt         DateTime             @default(now()) @db.Timestamptz
+  createdAt           DateTime             @default(now()) @db.Timestamptz
+  updatedAt           DateTime             @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, opportunityKey], map: "experiment_opportunity_store_key_unique")
+  @@index([storeId, active, confidence], map: "experiment_opportunity_store_confidence_idx")
+  @@map("experiment_opportunities")
+}
+
+model ExperimentRecommendation {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String   @db.Uuid
+  experimentId          String   @db.Uuid
+  recommendationKey     String   @db.VarChar(120)
+  title                 String   @db.VarChar(300)
+  reason                String   @db.VarChar(500)
+  expectedMonthlyGain   Decimal  @default(0) @db.Decimal(12, 2)
+  confidence            Decimal  @default(0) @db.Decimal(5, 4)
+  businessRisk          ExperimentRiskLevel @default(medium)
+  estimatedDurationDays Int      @default(14)
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now()) @db.Timestamptz
+  updatedAt             DateTime @updatedAt @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, recommendationKey], map: "experiment_recommendation_store_key_unique")
+  @@index([storeId, active], map: "experiment_recommendation_store_active_idx")
+  @@map("experiment_recommendations")
+}
+
+model ExperimentBaseline {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  experimentId    String   @db.Uuid
+  baselineKey     String   @db.VarChar(120)
+  revenue         Decimal  @default(0) @db.Decimal(12, 2)
+  conversion      Decimal  @default(0) @db.Decimal(8, 4)
+  ctr             Decimal  @default(0) @db.Decimal(8, 4)
+  inventory       Decimal  @default(0) @db.Decimal(12, 2)
+  traffic         Decimal  @default(0) @db.Decimal(12, 2)
+  seoScore        Decimal  @default(0) @db.Decimal(8, 4)
+  refunds         Decimal  @default(0) @db.Decimal(8, 4)
+  aov             Decimal  @default(0) @db.Decimal(12, 2)
+  margin          Decimal  @default(0) @db.Decimal(8, 4)
+  baselineJson    Json     @default("{}") @db.JsonB
+  capturedAt      DateTime @default(now()) @db.Timestamptz
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, baselineKey], map: "experiment_baseline_store_key_unique")
+  @@map("experiment_baselines")
+}
+
+model ExperimentVariant {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  experimentId    String   @db.Uuid
+  variantKey      String   @db.VarChar(120)
+  variantLabel    String   @db.VarChar(100)
+  currentValue    String   @db.VarChar(300)
+  proposedValue   String   @db.VarChar(300)
+  variantJson     Json     @default("{}") @db.JsonB
+  isControl       Boolean  @default(false)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, variantKey], map: "experiment_variant_store_key_unique")
+  @@map("experiment_variants")
+}
+
+model ExperimentObservation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String   @db.Uuid
+  experimentId     String   @db.Uuid
+  observationKey   String   @db.VarChar(120)
+  variantKey       String   @db.VarChar(120)
+  revenue          Decimal  @default(0) @db.Decimal(12, 2)
+  orders           Int      @default(0)
+  conversion       Decimal  @default(0) @db.Decimal(8, 4)
+  ctr              Decimal  @default(0) @db.Decimal(8, 4)
+  refunds          Decimal  @default(0) @db.Decimal(8, 4)
+  inventory        Decimal  @default(0) @db.Decimal(12, 2)
+  traffic          Decimal  @default(0) @db.Decimal(12, 2)
+  profit           Decimal  @default(0) @db.Decimal(12, 2)
+  margin           Decimal  @default(0) @db.Decimal(8, 4)
+  observationJson  Json     @default("{}") @db.JsonB
+  observedAt       DateTime @default(now()) @db.Timestamptz
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, observationKey], map: "experiment_observation_store_key_unique")
+  @@index([storeId, experimentId, observedAt], map: "experiment_observation_store_experiment_idx")
+  @@map("experiment_observations")
+}
+
+model ExperimentResult {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  experimentId    String   @db.Uuid
+  resultKey       String   @db.VarChar(120)
+  variantKey      String   @db.VarChar(120)
+  metricKey       String   @db.VarChar(100)
+  baselineValue   Decimal  @default(0) @db.Decimal(12, 4)
+  variantValue    Decimal  @default(0) @db.Decimal(12, 4)
+  difference      Decimal  @default(0) @db.Decimal(12, 4)
+  differencePct   Decimal  @default(0) @db.Decimal(8, 4)
+  confidence      Decimal  @default(0) @db.Decimal(5, 4)
+  resultJson      Json     @default("{}") @db.JsonB
+  computedAt      DateTime @default(now()) @db.Timestamptz
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, resultKey], map: "experiment_result_store_key_unique")
+  @@map("experiment_results")
+}
+
+model ExperimentWinner {
+  id              String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String                  @db.Uuid
+  experimentId    String                  @db.Uuid
+  winnerKey       String                  @db.VarChar(120)
+  variantKey      String                  @db.VarChar(120)
+  outcome         ExperimentWinnerOutcome
+  confidence      Decimal                 @default(0) @db.Decimal(5, 4)
+  revenueImpact   Decimal                 @default(0) @db.Decimal(12, 2)
+  profitImpact    Decimal                 @default(0) @db.Decimal(12, 2)
+  winnerJson      Json                    @default("{}") @db.JsonB
+  selectedAt      DateTime                @default(now()) @db.Timestamptz
+  createdAt       DateTime                @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, winnerKey], map: "experiment_winner_store_key_unique")
+  @@map("experiment_winners")
+}
+
+model ExperimentHistory {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  experimentId String   @db.Uuid
+  changeType   String   @db.VarChar(50)
+  snapshot     Json     @db.JsonB
+  changedAt    DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "experiment_history_store_changed_idx")
+  @@map("experiment_history")
+}
+
+model ExperimentLearning {
+  id              String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String              @db.Uuid
+  experimentId    String              @db.Uuid
+  eventType       ExperimentEventType
+  eventJson       Json                @default("{}") @db.JsonB
+  memoryIds       Json                @default("[]") @db.JsonB
+  evidenceIds     Json                @default("[]") @db.JsonB
+  emittedAt       DateTime            @default(now()) @db.Timestamptz
+  createdAt       DateTime            @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, eventType, emittedAt], map: "experiment_learning_store_event_idx")
+  @@map("experiment_learning")
+}
+
+model ExperimentConfidence {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId              String   @db.Uuid
+  experimentId         String   @db.Uuid
+  confidenceScore      Decimal  @default(0) @db.Decimal(5, 4)
+  observationCount     Int      @default(0)
+  dataCoverage         Decimal  @default(0) @db.Decimal(5, 4)
+  businessStability    Decimal  @default(0) @db.Decimal(5, 4)
+  historicalSupport    Decimal  @default(0) @db.Decimal(5, 4)
+  merchantSimilarity   Decimal  @default(0) @db.Decimal(5, 4)
+  freshness            Decimal  @default(0) @db.Decimal(5, 4)
+  confidenceJson       Json     @default("{}") @db.JsonB
+  computedAt           DateTime @default(now()) @db.Timestamptz
+
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, computedAt], map: "experiment_confidence_store_computed_idx")
+  @@map("experiment_confidences")
+}
+
+enum DecisionJournalType {
+  recommendation
+  prediction
+  experiment
+  root_cause
+  executive_decision
+  quick_win
+}
+
+enum MerchantActionType {
+  accepted
+  rejected
+  ignored
+  deferred
+  partially_implemented
+  expired
+  cancelled
+  approved
+  dismissed
+  confirmed
+  disputed
+  pending
+}
+
+enum LearningUpdateType {
+  confidence
+  memory
+  dna
+  personalization
+  adaptive_score
+  prediction_accuracy
+  behavior
+}
+
+model DecisionJournal {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId             String              @db.Uuid
+  journalKey          String              @db.VarChar(120)
+  decisionType        DecisionJournalType
+  sourceId            String              @db.VarChar(120)
+  title               String              @db.VarChar(300)
+  recommendation      String              @default("") @db.VarChar(500)
+  evidenceIds         Json                @default("[]") @db.JsonB
+  graphNodeIds        Json                @default("[]") @db.JsonB
+  memoryIds           Json                @default("[]") @db.JsonB
+  merchantAction      MerchantActionType  @default(pending)
+  businessContext     Json                @default("{}") @db.JsonB
+  merchantFeedback    Json                @default("{}") @db.JsonB
+  outcome             String              @default("") @db.VarChar(300)
+  revenueImpact       Decimal             @default(0) @db.Decimal(12, 2)
+  profitImpact        Decimal             @default(0) @db.Decimal(12, 2)
+  confidenceBefore    Decimal             @default(0) @db.Decimal(5, 4)
+  confidenceAfter     Decimal             @default(0) @db.Decimal(5, 4)
+  relatedTimelineId   String              @default("") @db.VarChar(120)
+  relatedRootCauseId  String              @default("") @db.VarChar(120)
+  relatedPredictionId String              @default("") @db.VarChar(120)
+  relatedExperimentId String              @default("") @db.VarChar(120)
+  journalJson         Json                @default("{}") @db.JsonB
+  processed           Boolean             @default(false)
+  createdAt           DateTime            @default(now()) @db.Timestamptz
+  updatedAt           DateTime            @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, journalKey], map: "decision_journal_store_key_unique")
+  @@index([storeId, processed, createdAt], map: "decision_journal_store_processed_idx")
+  @@map("decision_journal")
+}
+
+model MerchantDecision {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String             @db.Uuid
+  journalId       String             @db.VarChar(120)
+  decisionType    DecisionJournalType
+  action          MerchantActionType
+  actionJson      Json               @default("{}") @db.JsonB
+  decidedAt       DateTime           @default(now()) @db.Timestamptz
+  createdAt       DateTime           @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, decidedAt], map: "merchant_decision_store_decided_idx")
+  @@map("merchant_decisions")
+}
+
+model MerchantFeedback {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  journalKey   String   @db.VarChar(120)
+  feedbackType String   @db.VarChar(100)
+  feedbackText String   @default("") @db.VarChar(500)
+  feedbackJson Json     @default("{}") @db.JsonB
+  createdAt    DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, createdAt], map: "merchant_feedback_store_created_idx")
+  @@map("merchant_feedback")
+}
+
+model AdaptiveMemory {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  memoryKey       String   @db.VarChar(120)
+  memoryType      String   @db.VarChar(100)
+  memoryJson      Json     @db.JsonB
+  confidence      Decimal  @default(0) @db.Decimal(5, 4)
+  evidenceIds     Json     @default("[]") @db.JsonB
+  versionNumber   Int      @default(1)
+  lastUpdatedAt   DateTime @default(now()) @db.Timestamptz
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, memoryKey], map: "adaptive_memory_store_key_unique")
+  @@map("adaptive_memory")
+}
+
+model RecommendationOutcome {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId           String             @db.Uuid
+  outcomeKey        String             @db.VarChar(120)
+  sourceId          String             @db.VarChar(120)
+  recommendationType DecisionJournalType @default(recommendation)
+  merchantAction    MerchantActionType
+  revenueImpactPct  Decimal            @default(0) @db.Decimal(8, 4)
+  confidenceBefore  Decimal            @default(0) @db.Decimal(5, 4)
+  confidenceAfter   Decimal            @default(0) @db.Decimal(5, 4)
+  outcomeJson       Json               @default("{}") @db.JsonB
+  recordedAt        DateTime           @default(now()) @db.Timestamptz
+  createdAt         DateTime           @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, outcomeKey], map: "recommendation_outcome_store_key_unique")
+  @@map("recommendation_outcomes")
+}
+
+model PredictionAccuracyRecord {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String   @db.Uuid
+  accuracyKey      String   @db.VarChar(120)
+  predictionId     String   @db.VarChar(120)
+  predictedValue   Decimal  @db.Decimal(12, 4)
+  actualValue      Decimal? @db.Decimal(12, 4)
+  variance         Decimal  @default(0) @db.Decimal(12, 4)
+  accuracyScore    Decimal  @default(0) @db.Decimal(5, 4)
+  timeDifferenceDays Int    @default(0)
+  confidenceChange Decimal  @default(0) @db.Decimal(5, 4)
+  accuracyJson     Json     @default("{}") @db.JsonB
+  evaluatedAt      DateTime @default(now()) @db.Timestamptz
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, accuracyKey], map: "prediction_accuracy_store_key_unique")
+  @@map("prediction_accuracy")
+}
+
+model PredictionValidation {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String             @db.Uuid
+  validationKey   String             @db.VarChar(120)
+  predictionId    String             @db.VarChar(120)
+  merchantAction  MerchantActionType
+  validated       Boolean            @default(false)
+  confidenceDelta Decimal            @default(0) @db.Decimal(5, 4)
+  validationJson  Json               @default("{}") @db.JsonB
+  validatedAt     DateTime           @default(now()) @db.Timestamptz
+  createdAt       DateTime           @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, validationKey], map: "prediction_validation_store_key_unique")
+  @@map("prediction_validation")
+}
+
+model RootCauseValidation {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String             @db.Uuid
+  validationKey   String             @db.VarChar(120)
+  rootCauseId     String             @db.VarChar(120)
+  merchantAction  MerchantActionType
+  confirmed       Boolean            @default(false)
+  confidenceDelta Decimal            @default(0) @db.Decimal(5, 4)
+  validationJson  Json               @default("{}") @db.JsonB
+  validatedAt     DateTime           @default(now()) @db.Timestamptz
+  createdAt       DateTime           @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, validationKey], map: "root_cause_validation_store_key_unique")
+  @@map("root_cause_validation")
+}
+
+model MerchantPreference {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  preferenceKey   String   @db.VarChar(120)
+  domain          String   @db.VarChar(100)
+  preferenceValue Decimal  @default(0) @db.Decimal(8, 4)
+  observationCount Int     @default(0)
+  preferenceJson  Json     @default("{}") @db.JsonB
+  lastUpdatedAt   DateTime @default(now()) @db.Timestamptz
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, preferenceKey], map: "merchant_preference_store_key_unique")
+  @@map("merchant_preferences")
+}
+
+model MerchantBehaviorProfile {
+  storeId                   String   @id @db.Uuid
+  acceptsPricingChanges     Decimal  @default(0.5) @db.Decimal(5, 4)
+  rejectsInventoryChanges   Decimal  @default(0.5) @db.Decimal(5, 4)
+  ignoresSeo                Decimal  @default(0.5) @db.Decimal(5, 4)
+  prefersAutomation         Decimal  @default(0.5) @db.Decimal(5, 4)
+  acceptsHighConfidenceOnly Decimal  @default(0.5) @db.Decimal(5, 4)
+  approvesWeekendExperiments Decimal @default(0.5) @db.Decimal(5, 4)
+  actsQuickly               Decimal  @default(0.5) @db.Decimal(5, 4)
+  delaysDecisions           Decimal  @default(0.5) @db.Decimal(5, 4)
+  prefersLowRisk            Decimal  @default(0.5) @db.Decimal(5, 4)
+  prefersLongTermGrowth     Decimal  @default(0.5) @db.Decimal(5, 4)
+  prefersOperationalEfficiency Decimal @default(0.5) @db.Decimal(5, 4)
+  profileJson               Json     @default("{}") @db.JsonB
+  lastComputedAt            DateTime @default(now()) @db.Timestamptz
+  createdAt                 DateTime @default(now()) @db.Timestamptz
+  updatedAt                 DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("merchant_behavior_profiles")
+}
+
+model PersonalizationProfile {
+  storeId              String   @id @db.Uuid
+  priorityDomains      Json     @default("[]") @db.JsonB
+  deprioritizedDomains Json     @default("[]") @db.JsonB
+  decisionStyle        String   @default("balanced") @db.VarChar(100)
+  riskTolerance        String   @default("medium") @db.VarChar(50)
+  automationReadiness  Decimal  @default(0.5) @db.Decimal(5, 4)
+  profileJson          Json     @default("{}") @db.JsonB
+  lastComputedAt       DateTime @default(now()) @db.Timestamptz
+  createdAt            DateTime @default(now()) @db.Timestamptz
+  updatedAt            DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("personalization_profiles")
+}
+
+model AdaptiveConfidence {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId              String   @db.Uuid
+  confidenceKey        String   @db.VarChar(120)
+  domain               String   @db.VarChar(100)
+  confidenceScore      Decimal  @default(0) @db.Decimal(5, 4)
+  observationCount     Int      @default(0)
+  historicalSupport    Decimal  @default(0) @db.Decimal(5, 4)
+  merchantValidation   Decimal  @default(0) @db.Decimal(5, 4)
+  outcomeAccuracy      Decimal  @default(0) @db.Decimal(5, 4)
+  timeDecay            Decimal  @default(0) @db.Decimal(5, 4)
+  evidenceQuality      Decimal  @default(0) @db.Decimal(5, 4)
+  freshness            Decimal  @default(0) @db.Decimal(5, 4)
+  businessStability    Decimal  @default(0) @db.Decimal(5, 4)
+  confidenceJson       Json     @default("{}") @db.JsonB
+  computedAt           DateTime @default(now()) @db.Timestamptz
+  createdAt            DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, confidenceKey], map: "adaptive_confidence_store_key_unique")
+  @@index([storeId, computedAt], map: "adaptive_confidence_store_computed_idx")
+  @@map("adaptive_confidence")
+}
+
+model AdaptiveScore {
+  storeId                      String   @id @db.Uuid
+  score                        Int      @default(0)
+  merchantParticipationScore   Int      @default(0)
+  journalCoverageScore         Int      @default(0)
+  experimentCompletionScore    Int      @default(0)
+  recommendationAcceptanceScore Int     @default(0)
+  predictionAccuracyScore      Int      @default(0)
+  confidenceQualityScore       Int      @default(0)
+  memoryCoverageScore          Int      @default(0)
+  learningFreshnessScore         Int      @default(0)
+  dnaMaturityScore             Int      @default(0)
+  merchantFeedbackScore        Int      @default(0)
+  cooImprovementScore          Int      @default(0)
+  scoreJson                    Json     @default("{}") @db.JsonB
+  lastComputedAt               DateTime @default(now()) @db.Timestamptz
+  createdAt                    DateTime @default(now()) @db.Timestamptz
+  updatedAt                    DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("adaptive_score")
+}
+
+model DecisionTimeline {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String   @db.Uuid
+  timelineKey  String   @db.VarChar(120)
+  journalKey   String   @db.VarChar(120)
+  eventType    String   @db.VarChar(100)
+  eventJson    Json     @db.JsonB
+  occurredAt   DateTime @default(now()) @db.Timestamptz
+  createdAt    DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, timelineKey], map: "decision_timeline_store_key_unique")
+  @@index([storeId, occurredAt], map: "decision_timeline_store_occurred_idx")
+  @@map("decision_timelines")
+}
+
+model MerchantTimeline {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId     String   @db.Uuid
+  eventKey    String   @db.VarChar(120)
+  eventCategory String @db.VarChar(100)
+  title       String   @db.VarChar(300)
+  eventJson   Json     @db.JsonB
+  occurredAt  DateTime @default(now()) @db.Timestamptz
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, eventKey], map: "merchant_timeline_store_key_unique")
+  @@index([storeId, occurredAt], map: "merchant_timeline_store_occurred_idx")
+  @@map("merchant_timeline")
+}
+
+model BusinessMemoryVersion {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String   @db.Uuid
+  versionNumber   Int
+  memoryJson      Json     @db.JsonB
+  patternCount    Int      @default(0)
+  confidenceScore Decimal  @default(0) @db.Decimal(5, 4)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, versionNumber], map: "business_memory_version_store_unique")
+  @@map("business_memory_versions")
+}
+
+model LearningHistory {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId      String            @db.Uuid
+  updateType   LearningUpdateType
+  updateKey    String            @db.VarChar(120)
+  snapshot     Json              @db.JsonB
+  changedAt    DateTime          @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, changedAt], map: "learning_history_store_changed_idx")
+  @@map("learning_history")
+}
+
+model LearningSnapshot {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String   @db.Uuid
+  snapshotKey   String   @db.VarChar(120)
+  checkpointJson Json    @db.JsonB
+  versionNumber Int      @default(1)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, snapshotKey], map: "learning_snapshot_store_key_unique")
+  @@map("learning_snapshots")
+}
+
+model LearningAttribution {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId               String   @db.Uuid
+  attributionKey        String   @db.VarChar(120)
+  businessOutcome       String   @db.VarChar(300)
+  journalKey            String   @db.VarChar(120)
+  evidenceIds           Json     @default("[]") @db.JsonB
+  graphNodeIds          Json     @default("[]") @db.JsonB
+  merchantAction        MerchantActionType
+  learningUpdateType    LearningUpdateType
+  memoryVersionNumber   Int      @default(0)
+  dnaVersionNumber      Int      @default(0)
+  attributionJson       Json     @default("{}") @db.JsonB
+  createdAt             DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([storeId, attributionKey], map: "learning_attribution_store_key_unique")
+  @@index([storeId, createdAt], map: "learning_attribution_store_created_idx")
+  @@map("learning_attributions")
+}
+
+enum KnowledgeGraphNodeType {
+  Store
+  Product
+  Variant
+  Collection
+  InventoryItem
+  Vendor
+  Location
+  Order
+  OrderItem
+  Price
+  Refund
+  SeoRecord
+  Media
+  Experiment
+  Evidence
+  Recommendation
+  OperationalIssue
+  TrafficSource
+  SearchQuery
+  MarketingChannel
+  BusinessDNA
+  Decision
+  Outcome
+}
+
+enum KnowledgeGraphEdgeType {
+  BELONGS_TO
+  CONTAINS
+  USES
+  CREATES
+  AFFECTS
+  DEPENDS_ON
+  CAUSES
+  SUPPORTS
+  GENERATES
+  OBSERVED_BY
+  MEASURED_BY
+  LEARNS_FROM
+  PREDICTS
+  RESULTED_IN
+  CONNECTED_TO
+  RELATED_TO
+}
+
+enum KnowledgeGraphNodeStatus {
+  active
+  archived
+  expired
+  pending
+}
+
+model KnowledgeGraphNode {
+  id              String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId         String                   @db.Uuid
+  nodeType        KnowledgeGraphNodeType
+  canonicalKey    String                   @db.VarChar(150)
+  displayName     String                   @db.VarChar(500)
+  status          KnowledgeGraphNodeStatus @default(active)
+  version         Int                      @default(1)
+  confidence      Decimal                  @default(1) @db.Decimal(5, 4)
+  metadata        Json                     @default("{}") @db.JsonB
+  evidenceId      String?                  @db.Uuid
+  createdAt       DateTime                 @default(now()) @db.Timestamptz
+  updatedAt       DateTime                 @updatedAt @db.Timestamptz
+
+  store              Store                      @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  evidence           Evidence?                  @relation(fields: [evidenceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  edgesFrom          KnowledgeGraphEdge[]       @relation("GraphEdgeFrom")
+  edgesTo            KnowledgeGraphEdge[]       @relation("GraphEdgeTo")
+  relationshipsFrom  KnowledgeGraphRelationship[] @relation("GraphRelationshipFrom")
+  relationshipsTo    KnowledgeGraphRelationship[] @relation("GraphRelationshipTo")
+  searchIndexEntries KnowledgeGraphSearchIndex[]
+
+  @@unique([storeId, nodeType, canonicalKey], map: "knowledge_graph_node_unique")
+  @@index([storeId, nodeType], map: "knowledge_graph_node_store_type_idx")
+  @@index([storeId, status], map: "knowledge_graph_node_store_status_idx")
+  @@map("knowledge_graph_nodes")
+}
+
+model KnowledgeGraphEdge {
+  id                 String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId            String                 @db.Uuid
+  fromNodeId         String                 @db.Uuid
+  toNodeId           String                 @db.Uuid
+  relationship       KnowledgeGraphEdgeType
+  confidence         Decimal                @default(1) @db.Decimal(5, 4)
+  source             String                 @db.VarChar(100)
+  evidenceId         String?                @db.Uuid
+  evidenceVersion    Int?
+  evidenceSource     String?                @db.VarChar(100)
+  observationCount   Int                    @default(1)
+  freshnessMinutes   Int?
+  strength           Decimal?               @db.Decimal(5, 4)
+  weight             Decimal?               @db.Decimal(8, 4)
+  active             Boolean                @default(true)
+  createdAt          DateTime               @default(now()) @db.Timestamptz
+  expiresAt          DateTime?              @db.Timestamptz
+
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fromNode KnowledgeGraphNode @relation("GraphEdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  toNode   KnowledgeGraphNode @relation("GraphEdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  evidence Evidence?          @relation(fields: [evidenceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([storeId, fromNodeId, toNodeId, relationship], map: "knowledge_graph_edge_unique")
+  @@index([storeId, relationship], map: "knowledge_graph_edge_store_rel_idx")
+  @@index([storeId, fromNodeId], map: "knowledge_graph_edge_from_idx")
+  @@index([storeId, toNodeId], map: "knowledge_graph_edge_to_idx")
+  @@index([storeId, evidenceId], map: "knowledge_graph_edge_evidence_idx")
+  @@map("knowledge_graph_edges")
+}
+
+model KnowledgeGraphRelationship {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId          String                 @db.Uuid
+  fromNodeId       String                 @db.Uuid
+  toNodeId         String                 @db.Uuid
+  relationship     KnowledgeGraphEdgeType
+  semanticLabel    String                 @db.VarChar(150)
+  evidenceId       String?                @db.Uuid
+  evidenceVersion  Int?
+  evidenceSource   String?                @db.VarChar(100)
+  confidence       Decimal                @default(1) @db.Decimal(5, 4)
+  observationCount Int                    @default(1)
+  freshnessMinutes Int?
+  active           Boolean                @default(true)
+  createdAt        DateTime               @default(now()) @db.Timestamptz
+  updatedAt        DateTime               @updatedAt @db.Timestamptz
+
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  fromNode KnowledgeGraphNode @relation("GraphRelationshipFrom", fields: [fromNodeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  toNode   KnowledgeGraphNode @relation("GraphRelationshipTo", fields: [toNodeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  evidence Evidence?          @relation(fields: [evidenceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([storeId, fromNodeId, toNodeId, relationship, semanticLabel], map: "knowledge_graph_relationship_unique")
+  @@index([storeId, semanticLabel], map: "knowledge_graph_relationship_label_idx")
+  @@map("knowledge_graph_relationships")
+}
+
+model KnowledgeGraphVersion {
+  storeId       String   @db.Uuid
+  versionNumber Int
+  label         String   @db.VarChar(255)
+  description   String?  @db.Text
+  nodeCount     Int      @default(0)
+  edgeCount     Int      @default(0)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([storeId, versionNumber])
+  @@map("knowledge_graph_versions")
+}
+
+model KnowledgeGraphSnapshot {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId       String   @db.Uuid
+  versionNumber Int
+  snapshotHash  String   @db.VarChar(64)
+  nodeSnapshot  Json     @db.JsonB
+  edgeSnapshot  Json     @db.JsonB
+  metricsSnapshot Json   @default("{}") @db.JsonB
+  immutable     Boolean  @default(true)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, versionNumber], map: "knowledge_graph_snapshot_store_version_idx")
+  @@index([storeId, createdAt], map: "knowledge_graph_snapshot_store_created_idx")
+  @@map("knowledge_graph_snapshots")
+}
+
+model KnowledgeGraphMetadata {
+  storeId        String   @id @db.Uuid
+  currentVersion Int      @default(1)
+  lastBuiltAt    DateTime? @db.Timestamptz
+  builderStatus  String   @default("idle") @db.VarChar(50)
+  builderCheckpoint Json  @default("{}") @db.JsonB
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_graph_metadata")
+}
+
+model KnowledgeGraphIntegrity {
+  storeId         String   @id @db.Uuid
+  integrityScore  Decimal  @default(1) @db.Decimal(5, 4)
+  issueCount      Int      @default(0)
+  issues          Json     @default("[]") @db.JsonB
+  lastCheckedAt   DateTime @default(now()) @db.Timestamptz
+  lastRepairedAt  DateTime? @db.Timestamptz
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_graph_integrity")
+}
+
+model KnowledgeGraphStatistics {
+  storeId               String   @id @db.Uuid
+  totalNodes            Int      @default(0)
+  totalEdges            Int      @default(0)
+  averageDegree         Decimal  @default(0) @db.Decimal(8, 4)
+  connectedComponents   Int      @default(0)
+  disconnectedNodes     Int      @default(0)
+  graphDensity          Decimal  @default(0) @db.Decimal(8, 6)
+  evidenceCoverage      Decimal  @default(0) @db.Decimal(5, 4)
+  businessCoverage      Decimal  @default(0) @db.Decimal(5, 4)
+  relationshipCoverage  Decimal  @default(0) @db.Decimal(5, 4)
+  lastComputedAt        DateTime @default(now()) @db.Timestamptz
+  createdAt             DateTime @default(now()) @db.Timestamptz
+  updatedAt             DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_graph_statistics")
+}
+
+model KnowledgeGraphSearchIndex {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  storeId    String   @db.Uuid
+  nodeId     String?  @db.Uuid
+  edgeId     String?  @db.Uuid
+  searchText String   @db.VarChar(500)
+  tags       String[] @default([])
+  metadata   Json     @default("{}") @db.JsonB
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  updatedAt  DateTime @updatedAt @db.Timestamptz
+
+  store Store              @relation(fields: [storeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  node  KnowledgeGraphNode? @relation(fields: [nodeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([storeId, searchText], map: "knowledge_graph_search_text_idx")
+  @@index([storeId, nodeId], map: "knowledge_graph_search_node_idx")
+  @@map("knowledge_graph_search_index")
+}
+
+model KnowledgeGraphBuildCheckpoint {
+  storeId           String   @id @db.Uuid
+  status            String   @default("idle") @db.VarChar(50)
+  evidenceCursor    String?  @db.Uuid
+  evidenceProcessed Int      @default(0)
+  nodesCreated      Int      @default(0)
+  edgesCreated      Int      @default(0)
+  scopeEntityType   String?  @db.VarChar(50)
+  scopeEntityId     String?  @db.VarChar(100)
+  checkpointJson    Json     @default("{}") @db.JsonB
+  lastBuiltAt       DateTime? @db.Timestamptz
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@map("knowledge_graph_build_checkpoints")
 }

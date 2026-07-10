@@ -1,0 +1,356 @@
+import type { ExperimentTemplateDefinition } from "./types";
+
+const PRICING_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("pricing:price_increase", "pricing", "Price increase test", ["prediction", "root_cause", "pattern"], ["pricing"], (input) => ({
+    experimentDomain: "pricing",
+    templateKey: "pricing:price_increase",
+    title: "Increase price by 5%",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Increase representative product price by 5% based on low elasticity signals",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 1.1),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.45),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 14,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "revenue", targetImprovementPct: 5, secondaryMetrics: ["margin", "conversion"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: priceVariants(input.baseline.aov, [1.05, 0.95]),
+    reason: "Historical pricing patterns suggest low price elasticity",
+  })),
+  template("pricing:margin_optimization", "pricing", "Margin optimization", ["prediction", "evidence"], ["pricing"], (input) => ({
+    experimentDomain: "pricing",
+    templateKey: "pricing:margin_optimization",
+    title: "Optimize margin on at-risk products",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Adjust pricing on margin-risk products to restore target margin",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.6),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 12,
+    merchantEffort: 3,
+    businessRisk: "medium",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "margin", targetImprovementPct: 8, secondaryMetrics: ["revenue"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: priceVariants(input.baseline.aov, [1.08, 1.0]),
+    reason: "Margin risk signals indicate pricing below target",
+  })),
+];
+
+const SEO_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("seo:meta_description", "seo", "Meta description optimization", ["prediction", "root_cause", "evidence"], ["seo"], (input) => ({
+    experimentDomain: "seo",
+    templateKey: "seo:meta_description",
+    title: "Add meta descriptions to top products",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Add optimized meta descriptions to products missing SEO metadata",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.8),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.3),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 14,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "traffic", targetImprovementPct: 8, secondaryMetrics: ["ctr", "conversion"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Missing meta", "Optimized meta description"),
+    reason: "Missing metadata and CTR trend indicate recoverable traffic",
+  })),
+  template("seo:product_title", "seo", "Product title optimization", ["evidence", "quick_win"], ["seo"], (input) => ({
+    experimentDomain: "seo",
+    templateKey: "seo:product_title",
+    title: "Optimize product titles for search",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Rewrite product titles with keyword-rich variants",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.7),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.25),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 21,
+    merchantEffort: 3,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "ctr", targetImprovementPct: 10, secondaryMetrics: ["traffic"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Current title", "Keyword-optimized title"),
+    reason: "SEO evidence gaps correlate with ranking loss",
+  })),
+];
+
+const INVENTORY_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("inventory:reorder_threshold", "inventory", "Reorder threshold adjustment", ["prediction", "root_cause"], ["inventory"], (input) => ({
+    experimentDomain: "inventory",
+    templateKey: "inventory:reorder_threshold",
+    title: "Adjust reorder thresholds",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Increase safety stock and reorder points for at-risk SKUs",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.4),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 30,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "inventory", targetImprovementPct: 15, secondaryMetrics: ["revenue"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Current threshold", "Threshold +20%"),
+    reason: "Stockout prediction and inventory pressure pattern detected",
+  })),
+  template("inventory:restock_timing", "inventory", "Restock timing optimization", ["prediction", "pattern"], ["inventory"], (input) => ({
+    experimentDomain: "inventory",
+    templateKey: "inventory:restock_timing",
+    title: "Optimize restock timing",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Advance restock orders by 4 days for high-velocity SKUs",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.9),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.35),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 21,
+    merchantEffort: 2,
+    businessRisk: "medium",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "inventory", targetImprovementPct: 12, secondaryMetrics: ["revenue"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Standard lead time", "Lead time -4 days"),
+    reason: "Supplier delay risk and stockout forecast converge",
+  })),
+];
+
+const BUNDLE_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("bundles:cross_sell", "bundles", "Cross-sell bundle", ["quick_win", "evidence"], ["bundles"], (input) => ({
+    experimentDomain: "bundles",
+    templateKey: "bundles:cross_sell",
+    title: "Create cross-sell bundle",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Bundle complementary products with 10% bundle discount",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.35),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 14,
+    merchantEffort: 3,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "aov", targetImprovementPct: 12, secondaryMetrics: ["revenue"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: priceVariants(input.baseline.aov * 2, [0.9, 1.0]),
+    reason: "Order patterns suggest frequently bought together opportunity",
+  })),
+];
+
+const COLLECTION_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("collections:merge", "collections", "Merge orphan collections", ["evidence", "prediction"], ["collections"], (input) => ({
+    experimentDomain: "collections",
+    templateKey: "collections:merge",
+    title: "Merge underperforming collections",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Merge orphan collections into active merchandising groups",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.6),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.2),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 7,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "conversion", targetImprovementPct: 5, secondaryMetrics: ["traffic"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Separate collections", "Merged collection"),
+    reason: "Collection inactivity prediction and orphan collection evidence",
+  })),
+];
+
+const MERCHANDISING_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("merchandising:featured_products", "merchandising", "Featured product placement", ["quick_win", "pattern"], ["merchandising"], (input) => ({
+    experimentDomain: "merchandising",
+    templateKey: "merchandising:featured_products",
+    title: "Feature high-margin products",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Promote top-margin products on homepage and collection pages",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.5),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 14,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "revenue", targetImprovementPct: 6, secondaryMetrics: ["margin"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Standard placement", "Featured placement"),
+    reason: "Revenue opportunity from quick wins and margin patterns",
+  })),
+];
+
+const CONTENT_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("content:description", "content", "Product description refresh", ["evidence"], ["content"], (input) => ({
+    experimentDomain: "content",
+    templateKey: "content:description",
+    title: "Refresh product descriptions",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Rewrite thin product descriptions with benefit-focused copy",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.5),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.2),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 21,
+    merchantEffort: 3,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "conversion", targetImprovementPct: 4, secondaryMetrics: ["ctr"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Thin description", "Benefit-focused description"),
+    reason: "Content gaps correlate with conversion decline signals",
+  })),
+];
+
+const OPERATIONS_TEMPLATES: ExperimentTemplateDefinition[] = [
+  template("operations:duplicate_cleanup", "operations", "Duplicate product cleanup", ["evidence"], ["operations"], (input) => ({
+    experimentDomain: "operations",
+    templateKey: "operations:duplicate_cleanup",
+    title: "Consolidate duplicate products",
+    businessProblem: input.opportunity.businessProblem,
+    proposedChange: "Archive duplicate listings and consolidate inventory records",
+    expectedRevenueImpact: roundCurrency(input.opportunity.estimatedImpact * 0.3),
+    expectedProfitImpact: roundCurrency(input.opportunity.estimatedImpact * 0.15),
+    confidence: input.opportunity.confidence,
+    estimatedDurationDays: 7,
+    merchantEffort: 2,
+    businessRisk: "low",
+    baselineMetrics: input.baseline,
+    successMetrics: { primaryMetric: "conversion", targetImprovementPct: 3, secondaryMetrics: ["inventory"] },
+    evidenceIds: input.opportunity.evidenceIds,
+    graphNodeIds: [],
+    memoryIds: input.opportunity.memoryIds,
+    predictionIds: input.opportunity.predictionIds,
+    rootCauseIds: input.opportunity.rootCauseIds,
+    recommendationSource: input.opportunity.sourceType,
+    variants: textVariants("Duplicate listings", "Consolidated listing"),
+    reason: "Operational evidence indicates catalog duplication hurting discoverability",
+  })),
+];
+
+export const EXPERIMENT_TEMPLATE_DEFINITIONS: ExperimentTemplateDefinition[] = [
+  ...PRICING_TEMPLATES,
+  ...SEO_TEMPLATES,
+  ...INVENTORY_TEMPLATES,
+  ...BUNDLE_TEMPLATES,
+  ...COLLECTION_TEMPLATES,
+  ...MERCHANDISING_TEMPLATES,
+  ...CONTENT_TEMPLATES,
+  ...OPERATIONS_TEMPLATES,
+];
+
+export const DOMAIN_TO_EVIDENCE_FACTS: Record<string, string[]> = {
+  pricing: ["PriceAboveCategoryAverage", "MarginRiskCandidate", "PriceChanged"],
+  seo: ["MissingSEO", "MissingMetaDescription", "MissingAltText"],
+  inventory: ["OutOfStock", "InventoryLow", "InventoryCritical"],
+  bundles: ["FrequentlyBoughtTogether", "LowAovBundleCandidate"],
+  collections: ["OrphanCollection", "SingleProductCollection"],
+  merchandising: ["LowVisibilityProduct", "HighMarginCandidate"],
+  content: ["ThinDescription", "MissingSEO"],
+  operations: ["DuplicateProduct", "OrphanVendor"],
+};
+
+export const SOURCE_DOMAIN_MAP: Record<string, string[]> = {
+  quick_win: ["pricing", "inventory", "seo", "merchandising", "bundles"],
+  root_cause: ["pricing", "inventory", "seo", "operations"],
+  prediction: ["pricing", "inventory", "seo", "collections"],
+  pattern: ["pricing", "inventory", "merchandising"],
+  evidence: ["seo", "content", "operations", "collections"],
+};
+
+export const MAX_EXPERIMENTS_PER_RUN = 12;
+export const SHADOW_MODE_STATUS = "shadow_simulated" as const;
+
+function template(
+  templateKey: string,
+  domain: ExperimentTemplateDefinition["domain"],
+  title: string,
+  requiredSourceTypes: ExperimentTemplateDefinition["requiredSourceTypes"],
+  matchDomains: string[],
+  buildExperiment: ExperimentTemplateDefinition["buildExperiment"],
+): ExperimentTemplateDefinition {
+  return { templateKey, domain, title, requiredSourceTypes, matchDomains, buildExperiment };
+}
+
+function priceVariants(basePrice: number, multipliers: number[]) {
+  const current = roundCurrency(basePrice);
+  return multipliers.map((multiplier, index) => ({
+    variantKey: `variant:${index === 0 ? "a" : "b"}`,
+    variantLabel: index === 0 ? "Variant A" : "Variant B",
+    currentValue: String(current),
+    proposedValue: String(roundCurrency(current * multiplier)),
+    isControl: index === multipliers.length - 1,
+  }));
+}
+
+function textVariants(current: string, proposed: string) {
+  return [
+    {
+      variantKey: "variant:a",
+      variantLabel: "Variant A",
+      currentValue: current,
+      proposedValue: proposed,
+      isControl: false,
+    },
+    {
+      variantKey: "variant:control",
+      variantLabel: "Control",
+      currentValue: current,
+      proposedValue: current,
+      isControl: true,
+    },
+  ];
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}

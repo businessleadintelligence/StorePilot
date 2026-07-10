@@ -55,7 +55,7 @@ describe("Executive dashboard inventory analytics types", () => {
     expect(formatRelativeTime("2026-06-20T10:00:00.000Z", Date.parse("2026-06-20T10:10:00.000Z"))).toBe(
       "10 min ago",
     );
-    expect(resolveMerchantDisplayName({ firstName: "Asha" })).toBe("Asha");
+    expect(resolveMerchantDisplayName({ shopName: "Asha Store" })).toBe("Asha Store");
   });
 
   it("builds health ring segments for inventory-aware command center data", () => {

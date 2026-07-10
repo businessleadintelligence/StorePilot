@@ -4,15 +4,11 @@ import {
   getSharedAiCreditsUsed,
   tryIncrementAiCreditsWithinLimit,
 } from "./billing.server";
-import { getStoreEntitlements, type EntitlementErrorCode } from "./entitlements.server";
 import { getSubscriptionAccessState } from "./subscription.server";
+import { getStoreEntitlements } from "./store-entitlements-loader.server";
 
-export type AiCostControlErrorCode =
-  | "budget_exceeded"
-  | "subscription_missing"
-  | "subscription_inactive"
-  | "plan_missing"
-  | "usage_missing";
+import type { EntitlementErrorCode, AiCostControlErrorCode } from "./access-control-types.server";
+export type { AiCostControlErrorCode } from "./access-control-types.server";
 
 export type AiAlertLevel =
   | "normal"

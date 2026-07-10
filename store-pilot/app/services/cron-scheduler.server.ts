@@ -6,8 +6,11 @@ import {
   runKnowledgeRefreshCron,
   runLearningEngineCron,
   runMetricsAggregationCron,
+  runPrivacyPiiScanCron,
   runRecommendationRefreshCron,
   runRetryQueueCron,
+  runScopeDriftMonitorCron,
+  runTokenMigrationCron,
 } from "./cron-jobs.server";
 
 export type CronScheduleDefinition = {
@@ -93,6 +96,30 @@ const CRON_SCHEDULES: CronScheduleDefinition[] = [
     path: "/cron/dispatch/recommendation-refresh",
     productionSafe: true,
   },
+  {
+    id: "privacy-pii-scan",
+    name: "Privacy PII Scan",
+    description: "Sample persisted JSON payloads and alert on prohibited customer PII",
+    schedule: "0 1 * * *",
+    path: "/cron/dispatch/privacy-pii-scan",
+    productionSafe: true,
+  },
+  {
+    id: "scope-drift-monitor",
+    name: "Scope Drift Monitor",
+    description: "Alert when configured Shopify scopes drift from privacy-by-architecture policy",
+    schedule: "0 8 * * *",
+    path: "/cron/dispatch/scope-drift-monitor",
+    productionSafe: true,
+  },
+  {
+    id: "token-migration",
+    name: "Token Migration",
+    description: "Encrypt any legacy plaintext integration or session tokens",
+    schedule: "0 5 * * *",
+    path: "/cron/dispatch/token-migration",
+    productionSafe: true,
+  },
 ];
 
 const CRON_RUNNERS: Record<string, CronRunner> = {
@@ -104,6 +131,9 @@ const CRON_RUNNERS: Record<string, CronRunner> = {
   "daily-operating-plan": runDailyOperatingPlanCron,
   "metrics-aggregation": runMetricsAggregationCron,
   "recommendation-refresh": runRecommendationRefreshCron,
+  "privacy-pii-scan": runPrivacyPiiScanCron,
+  "scope-drift-monitor": runScopeDriftMonitorCron,
+  "token-migration": runTokenMigrationCron,
 };
 
 export function listCronSchedules(): CronScheduleDefinition[] {

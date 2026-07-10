@@ -9,6 +9,7 @@ import {
 import { syncInventoryFromShopify } from "./inventory.server";
 import {
   JobWorkerOwnershipError,
+  beginJobExecution,
   claimNextJob,
   completeJob,
   extendJobLock,
@@ -20,6 +21,7 @@ import {
   finalizeFailedOnboardingJob,
   finalizeSuccessfulJobPhase,
   markOnboardingOwnershipRepairCandidate,
+  markPhaseStarted,
   reconcileOnboardingWithCompletedJobs,
   repairOwnershipConflictOnboarding,
   type OnboardingPhase,
@@ -35,8 +37,40 @@ import {
   executeRecommendationsGenerateJob,
 } from "./cron-jobs.server";
 import { syncProductsFromShopify } from "./product.server";
+import { executeKnowledgeIngestJob, scheduleKnowledgeIngestJob } from "../knowledge/scheduler/knowledge-scheduler";
+import {
+  executeGraphBuildJob,
+  scheduleGraphBuildJob,
+} from "../knowledge/graph/scheduler/graph-scheduler";
+import { executeLearningBootstrapJob } from "../learning/scheduler/learning-bootstrap-scheduler";
+import {
+  executeHistoricalIntelligenceJob,
+  scheduleHistoricalIntelligenceJob,
+} from "../learning/historical/scheduler/historical-scheduler";
+import {
+  executeQuickWinsGenerateJob,
+  scheduleQuickWinsGenerateJob,
+} from "../learning/quick-wins/scheduler/quick-wins-scheduler";
+import {
+  executeExecutiveDecisionJob,
+  executeExecutiveCooGenerateJob,
+  scheduleExecutiveDecisionJob,
+} from "../executive/scheduler/executive-scheduler";
+import {
+  executeRootCauseGenerateJob,
+} from "../root-cause/scheduler/root-cause-scheduler";
+import {
+  executePredictionGenerateJob,
+} from "../prediction/scheduler/prediction-scheduler";
+import {
+  executeExperimentGenerateJob,
+} from "../experiments/scheduler/experiment-scheduler";
+import {
+  executeMerchantIntelligenceRefreshJob,
+} from "../merchant-intelligence/scheduler/merchant-intelligence-scheduler";
 import type { StoreSyncAdminClient } from "./store.server";
 import { assertStartupReadiness } from "./startup-readiness.server";
+import { trackInFlightJob } from "./worker-in-flight.server";
 
 const LOG_PREFIX = "[worker]";
 const JOB_HEARTBEAT_INTERVAL_MS = 60_000;
@@ -557,6 +591,14 @@ async function executeKnownJob(
           throw new Error("bootstrap_products_sync_failed");
         }
 
+        void scheduleKnowledgeIngestJob({
+          storeId: job.storeId,
+          shop,
+          syncMode: "initial_import",
+          idempotencyKey: `knowledge:initial:${job.storeId}`,
+          priority: "normal",
+        }).catch(() => undefined);
+
         const phase = JOB_TYPE_TO_PHASE[job.jobType];
         if (phase) {
           return finalizeSuccessfulOnboardingJob(
@@ -693,6 +735,152 @@ async function executeKnownJob(
       case JobType.founder_maintenance: {
         return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
       }
+      case JobType.knowledge_ingest:
+      case JobType.knowledge_fact_refresh: {
+        const payload = (job.payload ?? {}) as {
+          shop?: string;
+          syncMode?: import("@prisma/client").KnowledgeSyncMode;
+        };
+        const result = await executeKnowledgeIngestJob({
+          storeId: job.storeId,
+          shop: payload.shop ?? shop,
+          syncMode:
+            payload.syncMode ??
+            (job.jobType === JobType.knowledge_fact_refresh
+              ? "fact_refresh"
+              : "incremental"),
+          admin,
+        });
+        if (!result.success) {
+          throw new Error("knowledge_ingest_failed");
+        }
+        if (result.hasMoreWork) {
+          await scheduleKnowledgeIngestJob({
+            storeId: job.storeId,
+            shop: payload.shop ?? shop,
+            syncMode:
+              payload.syncMode ??
+              (job.jobType === JobType.knowledge_fact_refresh
+                ? "fact_refresh"
+                : "incremental"),
+            idempotencyKey: `knowledge:continue:${job.storeId}:${result.productsProcessed}:${result.ordersProcessed}`,
+          });
+        } else {
+          void scheduleGraphBuildJob({
+            storeId: job.storeId,
+            idempotencyKey: `graph:after-ingest:${job.storeId}`,
+          }).catch(() => undefined);
+        }
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.knowledge_graph_build:
+      case JobType.knowledge_graph_incremental: {
+        const payload = (job.payload ?? {}) as {
+          entityType?: string;
+          entityId?: string;
+        };
+        const graphResult = await executeGraphBuildJob({
+          storeId: job.storeId,
+          incremental: job.jobType === JobType.knowledge_graph_incremental,
+          entityType: payload.entityType,
+          entityId: payload.entityId,
+          resumeFromCheckpoint: true,
+        });
+        if (graphResult.hasMoreWork) {
+          await scheduleGraphBuildJob({
+            storeId: job.storeId,
+            incremental: job.jobType === JobType.knowledge_graph_incremental,
+            entityType: payload.entityType,
+            entityId: payload.entityId,
+            idempotencyKey: `graph:continue:${job.storeId}:${graphResult.evidenceProcessed}`,
+          });
+        } else if (job.jobType === JobType.knowledge_graph_build) {
+          void scheduleHistoricalIntelligenceJob({
+            storeId: job.storeId,
+            graphVersion: graphResult.snapshotVersion,
+            idempotencyKey: `historical:after-graph:${job.storeId}`,
+          }).catch(() => undefined);
+        }
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.historical_intelligence: {
+        const payload = (job.payload ?? {}) as {
+          graphVersion?: number;
+          snapshotVersion?: number;
+        };
+        await executeHistoricalIntelligenceJob({
+          storeId: job.storeId,
+          graphVersion: payload.graphVersion,
+          snapshotVersion: payload.snapshotVersion,
+        });
+        void scheduleQuickWinsGenerateJob({
+          storeId: job.storeId,
+          graphVersion: payload.graphVersion,
+          idempotencyKey: `quick-wins:after-historical:${job.storeId}`,
+        }).catch(() => undefined);
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.quick_wins_generate: {
+        await executeQuickWinsGenerateJob({
+          storeId: job.storeId,
+        });
+        void scheduleExecutiveDecisionJob({
+          storeId: job.storeId,
+          idempotencyKey: `executive:after-quick-wins:${job.storeId}`,
+        }).catch(() => undefined);
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.executive_decision_generate: {
+        await executeExecutiveDecisionJob({
+          storeId: job.storeId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.executive_coo_generate: {
+        const payload = (job.payload ?? {}) as { contextSnapshotId?: string };
+        await executeExecutiveCooGenerateJob({
+          storeId: job.storeId,
+          contextSnapshotId: payload.contextSnapshotId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.merchant_intelligence_refresh: {
+        await executeMerchantIntelligenceRefreshJob({
+          storeId: job.storeId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.experiment_generate: {
+        const payload = (job.payload ?? {}) as { contextSnapshotId?: string };
+        await executeExperimentGenerateJob({
+          storeId: job.storeId,
+          contextSnapshotId: payload.contextSnapshotId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.prediction_generate: {
+        const payload = (job.payload ?? {}) as { contextSnapshotId?: string };
+        await executePredictionGenerateJob({
+          storeId: job.storeId,
+          contextSnapshotId: payload.contextSnapshotId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.root_cause_generate: {
+        const payload = (job.payload ?? {}) as { contextSnapshotId?: string };
+        await executeRootCauseGenerateJob({
+          storeId: job.storeId,
+          contextSnapshotId: payload.contextSnapshotId,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
+      case JobType.learning_bootstrap: {
+        await executeLearningBootstrapJob({
+          storeId: job.storeId,
+          admin,
+        });
+        return finalizeSuccessfulStandaloneJob(job, workerId, Date.now() - startedAt);
+      }
       default:
         return handleUnknownJobType(job, workerId);
     }
@@ -701,7 +889,7 @@ async function executeKnownJob(
   });
 }
 
-async function prepareWorkerQueue(workerId: string): Promise<number> {
+export async function prepareWorkerQueue(workerId: string): Promise<number> {
   await releaseStaleJobs();
 
   const ownershipRepaired = await repairOwnershipConflictOnboarding();
@@ -733,7 +921,7 @@ async function executeNextClaimedJob(
     return null;
   }
 
-  const job = claim.job;
+  let job = claim.job;
 
   logWorker("info", "Job claimed for execution", {
     workerId,
@@ -744,6 +932,19 @@ async function executeNextClaimedJob(
   });
 
   try {
+    job = await beginJobExecution({
+      jobId: job.id,
+      storeId: job.storeId,
+      workerId,
+      workerGeneration: claim.workerGeneration,
+    });
+
+    const onboardingPhase = JOB_TYPE_TO_PHASE[job.jobType];
+    if (onboardingPhase) {
+      await markPhaseStarted(job.storeId, onboardingPhase);
+    }
+
+    trackInFlightJob(job.id);
     return await executeKnownJob(job, workerId, claim.workerGeneration);
   } catch (error) {
     if (error instanceof JobWorkerOwnershipError) {
@@ -757,7 +958,11 @@ async function executeNextClaimedJob(
         jobId: job.id,
         jobType: job.jobType,
         status:
-          failedJob.status === JobStatus.dead_letter ? "dead_letter" : "failed",
+          failedJob.status === JobStatus.dead_letter
+            ? "dead_letter"
+            : failedJob.status === JobStatus.retrying
+              ? "failed"
+              : "failed",
         workerId,
       };
     } catch (failureError) {
@@ -767,6 +972,8 @@ async function executeNextClaimedJob(
 
       throw failureError;
     }
+  } finally {
+    trackInFlightJob(null);
   }
 }
 
@@ -780,7 +987,7 @@ export async function runNextJob(
 export async function runWorkerCycle(
   workerId: string,
 ): Promise<RunWorkerCycleResult> {
-  return runWorkerBatch(workerId, 1);
+  return runWorkerBatch(workerId, resolveWorkerBatchSize());
 }
 
 export async function runWorkerBatch(

@@ -7,6 +7,7 @@ import {
   decryptSecretToken,
   encryptSecretToken,
 } from "./token-crypto.server";
+import { stripMerchantSessionPii } from "../lib/merchant-identity.server";
 
 function decryptSession(session: Session): Session {
   session.accessToken = decryptSecretToken(session.accessToken);
@@ -24,22 +25,23 @@ export class EncryptedPrismaSessionStorage implements SessionStorage {
   }
 
   async storeSession(session: Session): Promise<boolean> {
-    const encryptedAccessToken = encryptSecretToken(session.accessToken);
-    const encryptedRefreshToken = session.refreshToken
-      ? encryptSecretToken(session.refreshToken)
+    const sanitizedSession = stripMerchantSessionPii(session);
+    const encryptedAccessToken = encryptSecretToken(sanitizedSession.accessToken);
+    const encryptedRefreshToken = sanitizedSession.refreshToken
+      ? encryptSecretToken(sanitizedSession.refreshToken)
       : undefined;
 
-    session.accessToken = encryptedAccessToken;
+    sanitizedSession.accessToken = encryptedAccessToken;
     if (encryptedRefreshToken) {
-      session.refreshToken = encryptedRefreshToken;
+      sanitizedSession.refreshToken = encryptedRefreshToken;
     }
 
     try {
-      return await this.storage.storeSession(session);
+      return await this.storage.storeSession(sanitizedSession);
     } finally {
-      session.accessToken = decryptSecretToken(encryptedAccessToken);
+      sanitizedSession.accessToken = decryptSecretToken(encryptedAccessToken);
       if (encryptedRefreshToken) {
-        session.refreshToken = decryptSecretToken(encryptedRefreshToken);
+        sanitizedSession.refreshToken = decryptSecretToken(encryptedRefreshToken);
       }
     }
   }

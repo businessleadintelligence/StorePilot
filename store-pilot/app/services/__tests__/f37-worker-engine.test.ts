@@ -224,7 +224,7 @@ describe("F.3.7 Worker Execution Engine", () => {
     const updatedJob = harness.dbState.syncJobs.get(job.id);
 
     expect(result?.status).toBe("failed");
-    expect(updatedJob?.status).toBe("queued");
+    expect(updatedJob?.status).toBe("retrying");
     expect(updatedJob?.attempts).toBe(1);
   });
 
@@ -309,10 +309,45 @@ describe("F.3.7 Worker Execution Engine", () => {
     expect(result).toBeNull();
   });
 
-  it("8. runWorkerCycle wraps a single job execution", async () => {
-    seedQueuedBootstrapJob({
+  it("8. runWorkerCycle wraps batch job execution", async () => {
+    process.env.CRON_JOB_BATCH_SIZE = "1";
+    const harness = testHarness();
+    const job = seedQueuedBootstrapJob({
       jobType: "bootstrap_products",
       idempotencyKey: "worker-cycle",
+    });
+
+    harness.dbState.storeOnboarding.set(STORE_ID, {
+      id: crypto.randomUUID(),
+      storeId: STORE_ID,
+      onboardingRunId: crypto.randomUUID(),
+      status: "running",
+      currentJobId: job.id,
+      productSyncStatus: "running",
+      productSyncJobId: job.id,
+      productSyncCompletedAt: null,
+      inventorySyncStatus: "not_started",
+      inventorySyncJobId: null,
+      inventorySyncCompletedAt: null,
+      ordersSyncStatus: "not_started",
+      ordersSyncJobId: null,
+      ordersSyncCompletedAt: null,
+      blockedReason: null,
+      blockedMessage: null,
+      degradedReason: null,
+      progressPercent: 33,
+      progressLabel: "Syncing products",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      attempts: 0,
+      maxAttempts: 5,
+      startedAt: new Date(),
+      coreCompletedAt: null,
+      completedAt: null,
+      fullCompletedAt: null,
+      failedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     vi.spyOn(productServer, "syncProductsFromShopify").mockResolvedValue({

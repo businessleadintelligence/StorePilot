@@ -64,7 +64,7 @@ describe("F.4.2 Worker Cron Route", () => {
 
   it("3. exposes cron health on GET loader", async () => {
     const response = await loader({
-      request: createRequest({ method: "GET", secret: CRON_SECRET }),
+      request: createRequest({ method: "GET" }),
     } as Parameters<typeof loader>[0]);
 
     expect(response.status).toBe(200);

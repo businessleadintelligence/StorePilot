@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AutomationExecutionResult } from "../automation/automation-executor";
+import type { AutomationExecutionResult } from "./execution-result";
 
 export type IdempotencyRecord = {
   key: string;

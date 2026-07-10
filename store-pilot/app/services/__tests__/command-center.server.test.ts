@@ -55,14 +55,16 @@ const recommendation = {
 } satisfies ExecutiveRecommendationView;
 
 describe("Command center aggregation helpers", () => {
-  it("resolves merchant display names from session and shop data", () => {
+  it("resolves merchant display names from shop data without session PII", () => {
     expect(
       resolveMerchantDisplayName({
         firstName: "John",
         lastName: "Merchant",
+        shopName: "Acme Store",
       }),
-    ).toBe("John");
+    ).toBe("Acme Store");
     expect(resolveMerchantDisplayName({ shopName: "Acme Store" })).toBe("Acme Store");
+    expect(resolveMerchantDisplayName({ shop: "acme.myshopify.com" })).toBe("acme");
     expect(resolveMerchantDisplayName({})).toBe("there");
   });
 

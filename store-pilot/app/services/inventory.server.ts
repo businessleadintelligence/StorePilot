@@ -10,6 +10,7 @@ import {
   gateWebhookEvent,
   lookupStoreForWebhook,
 } from "./webhook.server";
+import { scheduleGraphUpdateFromWebhook } from "./knowledge-graph-webhook.server";
 
 const INVENTORY_ITEM_LEVELS_QUERY = `#graphql
   query StorePilotInventoryItemLevels($id: ID!, $cursor: String) {
@@ -655,6 +656,12 @@ export async function handleInventoryLevelUpdateWebhook(
     });
 
     await finalizeWebhookClaim(eventId, true, processingOwner);
+
+    void scheduleGraphUpdateFromWebhook({
+      storeId,
+      topic: input.topic,
+      payload: input.payload,
+    }).catch(() => undefined);
 
     const durationMs = Date.now() - startedAt;
 

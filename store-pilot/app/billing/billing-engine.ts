@@ -3,11 +3,13 @@ import { getSubscriptionAccessState } from "../services/subscription.server";
 import {
   isCommercialAccessAllowed,
   isFeatureEnabled,
+  isLegacyFeatureEnabled,
   resolveStoreCommercialPlan,
 } from "./billing-entitlements";
 import { buildUpgradeMessage, getPlanLimit } from "./billing-limits";
 import { getBillingUsageSnapshot, getUsageValueForAction } from "./billing-usage";
 import type { BillingAction, BillingLimitCheckResult } from "./billing-types";
+import type { FeatureKey } from "./plan-registry";
 
 export async function enforceBillingAction(
   storeId: string,
@@ -28,15 +30,19 @@ export async function enforceBillingAction(
     };
   }
 
-  if (action === "operations_create" && !isFeatureEnabled(plan, "operations")) {
+  if (action === "operations_create" && !isLegacyFeatureEnabled(plan, "operations")) {
     return blockedFeature(action, plan.slug, "Operations Center requires Growth plan or higher.");
   }
 
   if (
     (action === "automation_create" || action === "automation_execute") &&
-    !isFeatureEnabled(plan, "automation")
+    !isLegacyFeatureEnabled(plan, "automation")
   ) {
     return blockedFeature(action, plan.slug, "Automation Center requires Growth plan or higher.");
+  }
+
+  if (action === "api_request" && !isFeatureEnabled(plan, "api_access")) {
+    return blockedFeature(action, plan.slug, "API access requires Scale plan.");
   }
 
   if (action === "ai_execution") {
@@ -82,6 +88,30 @@ export async function enforceBillingAction(
   };
 }
 
+export async function enforceFeatureAccess(
+  storeId: string,
+  feature: FeatureKey,
+): Promise<{ allowed: boolean; upgradeMessage: string | null }> {
+  const access = await getSubscriptionAccessState(storeId);
+  if (access.accessState !== "allowed") {
+    return { allowed: false, upgradeMessage: "Activate a subscription to use this feature." };
+  }
+
+  const { plan } = await resolveStoreCommercialPlan(storeId);
+  const allowed = isFeatureEnabled(plan, feature);
+  if (allowed) {
+    return { allowed: true, upgradeMessage: null };
+  }
+
+  const availability = await import("./feature-gates.server").then((m) =>
+    m.getStoreFeatureAvailability(storeId, feature),
+  );
+  return {
+    allowed: false,
+    upgradeMessage: availability.upgradeText,
+  };
+}
+
 export async function assertBillingActionAllowed(
   storeId: string,
   action: BillingAction,
@@ -106,7 +136,7 @@ export class BillingEnforcementError extends Error {
 
 function blockedFeature(
   action: BillingAction,
-  planSlug: BillingLimitCheckResult["action"] extends never ? never : import("./billing-types").BillingPlanSlug,
+  planSlug: import("./billing-types").BillingPlanSlug,
   message: string,
 ): BillingLimitCheckResult {
   return {
@@ -143,17 +173,7 @@ export async function evaluateAllBillingLimits(
 
 export async function canAccessBillingProtectedFeature(
   storeId: string,
-  feature: "operations" | "automation" | "advanced_coo",
+  feature: FeatureKey,
 ): Promise<{ allowed: boolean; upgradeMessage: string | null }> {
-  const access = await getSubscriptionAccessState(storeId);
-  if (access.accessState !== "allowed") {
-    return { allowed: false, upgradeMessage: "Activate a subscription to use this feature." };
-  }
-
-  const { plan } = await resolveStoreCommercialPlan(storeId);
-  const allowed = isFeatureEnabled(plan, feature);
-  return {
-    allowed,
-    upgradeMessage: allowed ? null : `${feature} requires a higher plan. Upgrade from Billing.`,
-  };
+  return enforceFeatureAccess(storeId, feature);
 }

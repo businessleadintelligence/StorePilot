@@ -8,10 +8,7 @@ import {
 } from "../connectors";
 import { fetchClarityAnalyticsReport } from "../microsoft/clarity/clarity-client";
 import { ClarityApiError } from "../microsoft/clarity/clarity-api-error";
-import {
-  decryptSecretToken,
-  encryptSecretToken,
-} from "./token-crypto.server";
+import { encryptSecretToken } from "./token-crypto.server";
 
 export type ClarityIntegrationPublicView = {
   connected: boolean;
@@ -128,31 +125,16 @@ export async function disconnectMicrosoftClarityIntegration(storeId: string): Pr
   });
 }
 
-export async function loadActiveClarityIntegrationForConnector(
-  storeId: string,
-): Promise<MicrosoftClarityIntegration | null> {
-  return prisma.microsoftClarityIntegration.findFirst({
-    where: {
-      storeId,
-      isActive: true,
-      projectId: { not: "" },
-      apiToken: { not: "" },
-    },
-  });
-}
+import {
+  getClarityApiToken,
+  loadActiveClarityIntegrationForConnector,
+} from "../connectors/support/clarity-connector-integration.server";
 
-export function getClarityApiToken(integration: MicrosoftClarityIntegration): string {
-  const token = decryptSecretToken(integration.apiToken);
-  if (!token) {
-    throw new ClarityApiError({
-      code: "revoked_credentials",
-      message: "Microsoft Clarity API token is unavailable",
-      retryable: false,
-    });
-  }
-
-  return token;
-}
+export {
+  getClarityApiToken,
+  loadActiveClarityIntegrationForConnector,
+  markClarityIntegrationRevoked,
+} from "../connectors/support/clarity-connector-integration.server";
 
 export async function syncMicrosoftClarityForStore(storeId: string): Promise<{
   syncedAt: string;
@@ -203,19 +185,6 @@ export async function syncMicrosoftClarityForStore(storeId: string): Promise<{
   return { syncedAt: syncedAt.toISOString() };
 }
 
-export async function markClarityIntegrationRevoked(storeId: string, reason: string): Promise<void> {
-  await prisma.microsoftClarityIntegration.updateMany({
-    where: { storeId },
-    data: { isActive: false },
-  });
-
-  logClarityIntegrationError("Microsoft Clarity integration revoked", {
-    storeId,
-    operation: "clarity_integration_revoked",
-    reason,
-  });
-}
-
 export function redactClarityIntegrationForLogs(
   integration: MicrosoftClarityIntegration | null,
 ): Record<string, unknown> | null {
@@ -250,8 +219,4 @@ export async function fetchClarityReportForStore(storeId: string) {
 
 function logClarityIntegrationEvent(message: string, context: Record<string, unknown>): void {
   console.info(message, sanitizeLogContext(context));
-}
-
-function logClarityIntegrationError(message: string, context: Record<string, unknown>): void {
-  console.error(message, sanitizeLogContext(context));
 }

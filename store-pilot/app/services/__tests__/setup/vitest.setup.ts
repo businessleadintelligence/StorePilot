@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Prisma } from "@prisma/client";
 import { vi } from "vitest";
+import { STORE_DELETION_DELEGATES } from "../../gdpr-store-deletion.server";
 import type {
   JobPriority,
   JobStatus,
@@ -181,6 +182,7 @@ export type MockCustomerDataExport = {
   dataRequestId: string | null;
   shopifyWebhookId: string;
   exportPayload: unknown;
+  expiresAt: Date | null;
   createdAt: Date;
 };
 
@@ -223,6 +225,7 @@ export type MockOrder = {
   storeId: string;
   shopifyOrderId: string;
   orderName: string;
+  privacyRedacted?: boolean;
   shopifyCreatedAt: Date;
   shopifyUpdatedAt: Date;
   processedAt: Date;
@@ -247,6 +250,7 @@ export type MockOrderLineItem = {
   orderId: string;
   shopifyLineItemId: string;
   shopifyOrderId: string;
+  privacyRedacted?: boolean;
   shopifyProductId: string | null;
   shopifyVariantId: string | null;
   sku: string | null;
@@ -269,6 +273,37 @@ function orderKey(storeId: string, shopifyOrderId: string): string {
 
 function orderLineItemKey(storeId: string, shopifyLineItemId: string): string {
   return `${storeId}:${shopifyLineItemId}`;
+}
+
+function matchesMockOrderWhere(
+  order: MockOrder,
+  where: Record<string, unknown>,
+): boolean {
+  if (where.storeId && order.storeId !== where.storeId) {
+    return false;
+  }
+
+  if (
+    where.privacyRedacted === false &&
+    order.privacyRedacted === true
+  ) {
+    return false;
+  }
+
+  if (where.isTest !== undefined && order.isTest !== where.isTest) {
+    return false;
+  }
+
+  if (where.isPaid !== undefined && order.isPaid !== where.isPaid) {
+    return false;
+  }
+
+  const shopifyOrderId = where.shopifyOrderId as { in?: string[] } | undefined;
+  if (shopifyOrderId?.in && !shopifyOrderId.in.includes(order.shopifyOrderId)) {
+    return false;
+  }
+
+  return true;
 }
 
 function usageRecordKey(
@@ -607,7 +642,11 @@ function mockClaimNextJob(
 ): MockSyncJob[] {
   const now = new Date();
   const eligible = [...syncJobs.values()]
-    .filter((job) => job.status === "queued" && job.availableAt <= now)
+    .filter(
+      (job) =>
+        (job.status === "queued" || job.status === "retrying") &&
+        job.availableAt <= now,
+    )
     .sort((left, right) => {
       const rankDiff =
         JOB_PRIORITY_RANK[left.priority] - JOB_PRIORITY_RANK[right.priority];
@@ -623,14 +662,13 @@ function mockClaimNextJob(
     return [];
   }
 
-  job.status = "running";
+  job.status = "claimed";
   job.attempts += 1;
   job.workerGeneration = (job.workerGeneration ?? 0) + 1;
   job.lockedAt = claimedAt;
   job.lockedBy = workerId;
   job.lockExpiresAt = lockExpiresAt;
   job.heartbeatAt = claimedAt;
-  job.startedAt = job.startedAt ?? claimedAt;
   job.updatedAt = new Date();
   syncJobs.set(job.id, job);
 
@@ -1163,9 +1201,9 @@ const prismaMock = vi.hoisted(() => ({
         return { count };
       },
     ),
-    count: vi.fn(async ({ where }: { where: { storeId?: string } }) =>
-      [...dbState.orders.values()].filter(
-        (order) => !where.storeId || order.storeId === where.storeId,
+    count: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+      [...dbState.orders.values()].filter((order) =>
+        matchesMockOrderWhere(order, where ?? {}),
       ).length,
     ),
     findMany: vi.fn(
@@ -1175,28 +1213,14 @@ const prismaMock = vi.hoisted(() => ({
         orderBy,
         take,
       }: {
-        where: {
-          storeId?: string;
-          shopifyOrderId?: { in?: string[] };
-        };
+        where: Record<string, unknown>;
         select?: Record<string, boolean>;
         orderBy?: { processedAt?: "desc" | "asc" };
         take?: number;
       }) => {
-        let rows = [...dbState.orders.values()].filter((order) => {
-          if (where.storeId && order.storeId !== where.storeId) {
-            return false;
-          }
-
-          if (
-            where.shopifyOrderId?.in &&
-            !where.shopifyOrderId.in.includes(order.shopifyOrderId)
-          ) {
-            return false;
-          }
-
-          return true;
-        });
+        let rows = [...dbState.orders.values()].filter((order) =>
+          matchesMockOrderWhere(order, where ?? {}),
+        );
 
         if (orderBy?.processedAt) {
           rows = rows.sort((left, right) =>
@@ -1230,21 +1254,13 @@ const prismaMock = vi.hoisted(() => ({
         _sum,
         _count,
       }: {
-        where: { storeId?: string; isPaid?: boolean };
+        where: Record<string, unknown>;
         _sum?: { totalPriceAmount?: boolean };
         _count?: { _all?: boolean };
       }) => {
-        const rows = [...dbState.orders.values()].filter((order) => {
-          if (where.storeId && order.storeId !== where.storeId) {
-            return false;
-          }
-
-          if (where.isPaid !== undefined && order.isPaid !== where.isPaid) {
-            return false;
-          }
-
-          return true;
-        });
+        const rows = [...dbState.orders.values()].filter((order) =>
+          matchesMockOrderWhere(order, where ?? {}),
+        );
 
         const totalPriceAmount = rows.reduce(
           (sum, order) => sum + Number(order.totalPriceAmount ?? 0),
@@ -1385,6 +1401,7 @@ const prismaMock = vi.hoisted(() => ({
         where: {
           storeId?: string;
           shopifyOrderId?: string;
+          privacyRedacted?: boolean;
           OR?: Array<Record<string, unknown>>;
         };
         data: Partial<MockOrderLineItem>;
@@ -1400,6 +1417,10 @@ const prismaMock = vi.hoisted(() => ({
             where.shopifyOrderId &&
             lineItem.shopifyOrderId !== where.shopifyOrderId
           ) {
+            continue;
+          }
+
+          if (where.privacyRedacted === false && lineItem.privacyRedacted === true) {
             continue;
           }
 
@@ -2026,7 +2047,7 @@ const prismaMock = vi.hoisted(() => ({
         orderBy,
       }: {
         where?: {
-          status?: JobStatus;
+          status?: JobStatus | { in: JobStatus[] };
           lockExpiresAt?: { lt: Date };
         };
         orderBy?: { lockExpiresAt?: "asc" | "desc" };
@@ -2034,7 +2055,12 @@ const prismaMock = vi.hoisted(() => ({
         let jobs = [...dbState.syncJobs.values()];
 
         if (where?.status) {
-          jobs = jobs.filter((job) => job.status === where.status);
+          const statusFilter = where.status;
+          if (typeof statusFilter === "object") {
+            jobs = jobs.filter((job) => statusFilter.in.includes(job.status));
+          } else {
+            jobs = jobs.filter((job) => job.status === statusFilter);
+          }
         }
 
         if (where?.lockExpiresAt?.lt) {
@@ -3193,6 +3219,443 @@ const prismaMock = vi.hoisted(() => ({
       ...create,
     })),
   },
+  knowledgeReadiness: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      storeId: create.storeId,
+      ...create,
+    })),
+  },
+  knowledgeSyncCheckpoint: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+  },
+  evidence: {
+    findUnique: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    count: vi.fn(async () => 0),
+    groupBy: vi.fn(async () => []),
+  },
+  evidenceSource: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...create,
+    })),
+  },
+  evidenceHistory: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  evidenceObservation: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  knowledgeGraphNode: {
+    findUnique: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      version: 1,
+      status: "active",
+      confidence: 1,
+      metadata: {},
+      evidenceId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...data,
+    })),
+    update: vi.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => ({
+        id: where.id,
+        version: 1,
+        status: "active",
+        confidence: 1,
+        metadata: {},
+        evidenceId: null,
+        ...data,
+      }),
+    ),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    count: vi.fn(async () => 0),
+    groupBy: vi.fn(async () => []),
+  },
+  knowledgeGraphEdge: {
+    findUnique: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      active: true,
+      confidence: 1,
+      observationCount: 1,
+      ...data,
+    })),
+    update: vi.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => ({
+        id: where.id,
+        active: true,
+        ...data,
+      }),
+    ),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    count: vi.fn(async () => 0),
+  },
+  knowledgeGraphRelationship: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+    count: vi.fn(async () => 0),
+  },
+  knowledgeGraphVersion: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    findMany: vi.fn(async () => []),
+  },
+  knowledgeGraphSnapshot: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+    findFirst: vi.fn(async () => null),
+  },
+  knowledgeGraphMetadata: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      currentVersion: 0,
+      ...create,
+    })),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  knowledgeGraphIntegrity: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  knowledgeGraphStatistics: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  knowledgeGraphSearchIndex: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+    findMany: vi.fn(async () => []),
+  },
+  knowledgeGraphBuildCheckpoint: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      evidenceProcessed: 0,
+      nodesCreated: 0,
+      edgesCreated: 0,
+      ...create,
+    })),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  storeLearningProfile: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  learningReadiness: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  learningVelocity: {
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
+  learningEta: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  learningPriority: {
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
+  historicalMemory: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  historicalSnapshot: {
+    findFirst: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+  },
+  patternSeed: {
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  confidenceSeed: {
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  merchantBaseline: {
+    findFirst: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    createMany: vi.fn(async () => ({ count: 0 })),
+  },
+  quickWin: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  quickWinSummary: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  executiveDecision: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...create,
+    })),
+  },
+  decisionTask: {
+    findMany: vi.fn(async () => []),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+  },
+  decisionHistory: {
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+  },
+  executiveBriefing: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  dailyOperatingPlan: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  operationalReadiness: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  decisionScore: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  businessContextSnapshot: {
+    findFirst: vi.fn(async () => null),
+    findUnique: vi.fn(async () => null),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...data,
+    })),
+  },
+  rootCause: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...create,
+    })),
+  },
+  causalChain: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  causalTimeline: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  signalCorrelation: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  causeConfidence: {
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  impactAssessment: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  causalGraphEdge: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  rootCauseHistory: {
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  prediction: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...create,
+    })),
+  },
+  predictionHistory: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  predictionConfidence: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  forecastModel: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  forecastSnapshot: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  preventionAction: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  riskAssessment: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  businessStability: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experiment: {
+    findMany: vi.fn(async () => []),
+    findFirst: vi.fn(async () => null),
+    update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => ({
+      id: crypto.randomUUID(),
+      ...create,
+    })),
+  },
+  experimentTemplate: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentOpportunity: {
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentRecommendation: {
+    findMany: vi.fn(async () => []),
+    updateMany: vi.fn(async () => ({ count: 0 })),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentBaseline: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentVariant: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentObservation: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentResult: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentWinner: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  experimentHistory: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  experimentLearning: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  experimentConfidence: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  decisionJournal: {
+    findMany: vi.fn(async () => []),
+    count: vi.fn(async () => 0),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  merchantDecision: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  merchantFeedback: {
+    findMany: vi.fn(async () => []),
+  },
+  adaptiveMemory: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  recommendationOutcome: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  predictionAccuracyRecord: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  predictionValidation: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  rootCauseValidation: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  merchantPreference: {
+    findMany: vi.fn(async () => []),
+  },
+  merchantBehaviorProfile: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  personalizationProfile: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  adaptiveConfidence: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  adaptiveScore: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  decisionTimeline: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  merchantTimeline: {
+    findMany: vi.fn(async () => []),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  businessMemoryVersion: {
+    findFirst: vi.fn(async () => null),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  learningHistory: {
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
+  learningSnapshot: {
+    findUnique: vi.fn(async () => null),
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  learningAttribution: {
+    upsert: vi.fn(async ({ create }: { create: Record<string, unknown> }) => create),
+  },
+  businessDnaVersion: {
+    findFirst: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+  },
   user: {
     deleteMany: vi.fn(async ({ where }: { where: { storeId?: string } }) => {
       const before = dbState.users.length;
@@ -3321,8 +3784,48 @@ const prismaMock = vi.hoisted(() => ({
   ),
 }));
 
+for (const delegate of STORE_DELETION_DELEGATES) {
+  const record = prismaMock as unknown as Record<string, Record<string, unknown>>;
+  const existing = record[delegate];
+  if (!existing) {
+    record[delegate] = {
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    };
+    continue;
+  }
+  if (!existing.deleteMany) {
+    existing.deleteMany = vi.fn(async () => ({ count: 0 }));
+  }
+}
+
 vi.mock("../../../db.server", () => ({
   default: prismaMock,
+  getDatabaseMetricsSnapshot: vi.fn(() => ({
+    queryCount: 0,
+    slowQueryCount: 0,
+    retryCount: 0,
+    transactionCount: 0,
+    slowTransactionCount: 0,
+    connectionWaitMs: 0,
+    poolUtilizationEstimate: null,
+    averageQueryDurationMs: 0,
+    p95QueryDurationMs: 0,
+    recentSlowQueries: [],
+    recentSlowTransactions: [],
+  })),
+  auditDatabaseUrl: vi.fn(() => ({
+    usesSupabasePooler: false,
+    connectionLimit: null,
+    poolTimeoutSeconds: null,
+    pgbouncer: false,
+    warnings: [],
+    recommendations: [],
+  })),
+  withPrismaRetry: vi.fn(async (operation: () => Promise<unknown>) => operation()),
+  withPrismaTransaction: vi.fn(),
+  runInParallelBatches: vi.fn(),
+  disconnectPrismaClient: vi.fn(),
+  getDatabasePoolRecommendations: vi.fn(() => []),
 }));
 
 vi.mock("../../../shopify.server", () => ({
@@ -3454,6 +3957,7 @@ globalThis.__D7_TEST__ = {
       storeId: overrides.storeId ?? "store-test-001",
       shopifyOrderId: overrides.shopifyOrderId,
       orderName: overrides.orderName ?? "#1001",
+      privacyRedacted: overrides.privacyRedacted ?? false,
       shopifyCreatedAt: overrides.shopifyCreatedAt ?? new Date("2026-01-15T10:00:00Z"),
       shopifyUpdatedAt: overrides.shopifyUpdatedAt ?? new Date("2026-01-15T10:00:00Z"),
       processedAt: overrides.processedAt ?? new Date("2026-01-15T10:00:00Z"),
@@ -3482,6 +3986,7 @@ globalThis.__D7_TEST__ = {
       orderId: overrides.orderId,
       shopifyLineItemId: overrides.shopifyLineItemId,
       shopifyOrderId: overrides.shopifyOrderId ?? "gid://shopify/Order/1001",
+      privacyRedacted: overrides.privacyRedacted ?? false,
       shopifyProductId: overrides.shopifyProductId ?? null,
       shopifyVariantId: overrides.shopifyVariantId ?? null,
       sku: overrides.sku ?? null,

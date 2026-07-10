@@ -11,6 +11,7 @@ import {
   testHarness,
 } from "./helpers/fixtures";
 import { createTrialSubscription } from "../billing.server";
+import { getResolvedPlanLimit } from "../../billing/plan-registry";
 import {
   REDACTED_ORDER_NAME,
   handleCustomersDataRequestWebhook,
@@ -320,9 +321,11 @@ describe("F.6.12 A — customer GDPR compliance", () => {
 });
 
 describe("F.6.12 B — atomic billing enforcement", () => {
+  const STARTER_PRODUCT_LIMIT = getResolvedPlanLimit("starter", "products");
+
   it("allows only one concurrent product create at plan limit", async () => {
     await createTrialSubscription(STORE_ID, "starter");
-    seedProducts(999);
+    seedProducts(STARTER_PRODUCT_LIMIT - 1);
 
     const harness = testHarness();
     const firstRow = normalizeVariantRow(productNode, trackedVariantNode);
@@ -337,7 +340,7 @@ describe("F.6.12 B — atomic billing enforcement", () => {
 
     const outcomes = [firstResult.action, secondResult.action].sort();
     expect(outcomes).toEqual(["created", "limit_exceeded"]);
-    expect(harness.dbState.products.size).toBe(1000);
+    expect(harness.dbState.products.size).toBe(STARTER_PRODUCT_LIMIT);
   });
 
   it("allows only one concurrent order create at plan limit", async () => {

@@ -1,4 +1,5 @@
 ﻿import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import { getOrComputeCached, TimedCache } from "../lib/timed-cache.server";
 import { loadLatestCollaborationOutputFromStore } from "./collaboration.server";
 import { buildCollaborationChartData } from "../ai/collaboration/collaboration-timeline";
@@ -418,12 +419,11 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
   const [ordersByDay, lineItems, aiResults, inventoryResults, bundleResults, storeAuditResults, trendResults, seoIntelligenceResults, pricingIntelligenceResults, products] = await Promise.all([
     prisma.order.groupBy({
       by: ["metricDate"],
-      where: {
-        storeId,
+      where: orderWhereForMetrics(storeId, {
         isTest: false,
         cancelledAt: null,
         metricDate: { gte: thirtyDaysAgo },
-      },
+      }),
       _sum: { totalPriceAmount: true },
       orderBy: { metricDate: "asc" },
     }),
@@ -431,11 +431,12 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
       by: ["shopifyVariantId", "title"],
       where: {
         storeId,
-        order: {
+        privacyRedacted: false,
+        order: orderWhereForMetrics(storeId, {
           isTest: false,
           cancelledAt: null,
           metricDate: { gte: thirtyDaysAgo },
-        },
+        }),
       },
       _sum: { quantity: true },
       orderBy: { _sum: { quantity: "desc" } },
@@ -585,11 +586,10 @@ async function buildAnalytics(storeId: string, recommendations: ExecutiveRecomme
 
   const refundOrders = await prisma.order.groupBy({
     by: ["metricDate"],
-    where: {
-      storeId,
+    where: orderWhereForMetrics(storeId, {
       metricDate: { gte: thirtyDaysAgo },
       totalRefundedAmount: { gt: 0 },
-    },
+    }),
     _sum: { totalRefundedAmount: true },
     orderBy: { metricDate: "asc" },
   });

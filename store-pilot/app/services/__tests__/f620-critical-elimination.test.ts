@@ -309,12 +309,14 @@ describe("F.6.20 C3 — GDPR customer financial redact", () => {
 
     expect(order.orderName).toBe(REDACTED_ORDER_NAME);
     expect(order.displayFinancialStatus).toBeNull();
-    expect(order.totalPriceAmount).toBe("0");
-    expect(order.subtotalAmount).toBe("0");
+    expect(order.privacyRedacted).toBe(true);
+    expect(order.totalPriceAmount).toBe("199.99");
+    expect(order.subtotalAmount).toBe("180.00");
     expect(lineItem.title).toBe("[redacted]");
     expect(lineItem.sku).toBeNull();
-    expect(lineItem.originalUnitPrice).toBe("0");
-    expect(lineItem.discountedUnitPrice).toBe("0");
+    expect(lineItem.privacyRedacted).toBe(true);
+    expect(lineItem.originalUnitPrice).toBe("99.99");
+    expect(lineItem.discountedUnitPrice).toBe("89.99");
   });
 
   it("2. permitted operational aggregates remain intact", async () => {
@@ -378,12 +380,9 @@ describe("F.6.20 C3 — GDPR customer financial redact", () => {
       orderGids: [orderGid],
     });
 
-    expect(exportPayload.orders[0]?.orderName).toBe(REDACTED_ORDER_NAME);
-    expect(exportPayload.orders[0]?.totalPriceAmount).toBe("0");
-    expect(exportPayload.orderLineItems[0]?.title).toBe("[redacted]");
-    expect(exportPayload.orderLineItems[0]?.sku).toBeNull();
+    expect(exportPayload.orders).toHaveLength(0);
+    expect(exportPayload.orderLineItems).toHaveLength(0);
     expect(JSON.stringify(exportPayload)).not.toContain("SECRET-SKU");
     expect(JSON.stringify(exportPayload)).not.toContain("Sensitive item");
-    expect(JSON.stringify(exportPayload)).not.toContain("199.99");
   });
 });

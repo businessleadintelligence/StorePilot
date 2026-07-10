@@ -1,6 +1,7 @@
 import type { AIAgentId } from "@prisma/client";
 
-import prisma from "../../db.server";
+import prisma, { runInParallelBatches, withPrismaRetry } from "../../db.server";
+import { assertJsonPayloadFreeOfCustomerPii } from "../../lib/json-pii-guard.server";
 import type {
   AgentResultRecord,
   AgentRunRecord,
@@ -72,6 +73,7 @@ export function createPrismaAIPersistence(): AIPersistenceRepositories {
   return {
     runs: {
       create: async (input) => {
+        assertJsonPayloadFreeOfCustomerPii(input.contextJson, "AiAgentRun.contextJson");
         const created = await prisma.aiAgentRun.create({
           data: {
             id: input.id,
@@ -129,6 +131,7 @@ export function createPrismaAIPersistence(): AIPersistenceRepositories {
     },
     results: {
       create: async (input) => {
+        assertJsonPayloadFreeOfCustomerPii(input.resultJson, "AiAgentResult.resultJson");
         const created = await prisma.aiAgentResult.create({
           data: {
             id: input.id,
@@ -250,41 +253,49 @@ export function createPrismaAIPersistence(): AIPersistenceRepositories {
     },
     recommendations: {
       upsertMany: async (input) => {
-        const output: RecommendationRecord[] = [];
+        const upsertOne = async (
+          candidate: (typeof input)[number],
+        ): Promise<RecommendationRecord> => {
+          assertJsonPayloadFreeOfCustomerPii(
+            candidate.payloadJson,
+            "AiRecommendation.payloadJson",
+          );
+          const record = await withPrismaRetry(
+            () =>
+              prisma.aiRecommendation.upsert({
+                where: {
+                  storeId_stableId: {
+                    storeId: candidate.storeId,
+                    stableId: candidate.stableId,
+                  },
+                },
+                create: {
+                  stableId: candidate.stableId,
+                  storeId: candidate.storeId,
+                  agentId: candidate.agentId as AIAgentId,
+                  runId: candidate.runId,
+                  subjectKey: candidate.subjectKey,
+                  title: candidate.title,
+                  summary: candidate.summary,
+                  category: candidate.category,
+                  priority: candidate.priority,
+                  confidence: candidate.confidence,
+                  status: (candidate.status ?? "open") as never,
+                  payloadJson: candidate.payloadJson as object,
+                },
+                update: {
+                  runId: candidate.runId,
+                  summary: candidate.summary,
+                  priority: candidate.priority,
+                  confidence: candidate.confidence,
+                  payloadJson: candidate.payloadJson as object,
+                  lastSeenAt: new Date(),
+                },
+              }),
+            { label: "aiRecommendation.upsert" },
+          );
 
-        for (const candidate of input) {
-          const record = await prisma.aiRecommendation.upsert({
-            where: {
-              storeId_stableId: {
-                storeId: candidate.storeId,
-                stableId: candidate.stableId,
-              },
-            },
-            create: {
-              stableId: candidate.stableId,
-              storeId: candidate.storeId,
-              agentId: candidate.agentId as AIAgentId,
-              runId: candidate.runId,
-              subjectKey: candidate.subjectKey,
-              title: candidate.title,
-              summary: candidate.summary,
-              category: candidate.category,
-              priority: candidate.priority,
-              confidence: candidate.confidence,
-              status: (candidate.status ?? "open") as never,
-              payloadJson: candidate.payloadJson as object,
-            },
-            update: {
-              runId: candidate.runId,
-              summary: candidate.summary,
-              priority: candidate.priority,
-              confidence: candidate.confidence,
-              payloadJson: candidate.payloadJson as object,
-              lastSeenAt: new Date(),
-            },
-          });
-
-          output.push({
+          return {
             id: record.id,
             stableId: record.stableId,
             storeId: record.storeId,
@@ -303,10 +314,10 @@ export function createPrismaAIPersistence(): AIPersistenceRepositories {
             statusChangedAt: record.statusChangedAt.toISOString(),
             createdAt: record.createdAt.toISOString(),
             updatedAt: record.updatedAt.toISOString(),
-          });
-        }
+          };
+        };
 
-        return output;
+        return runInParallelBatches(input, 5, upsertOne);
       },
       updateStatus: async (input) => {
         try {
@@ -380,6 +391,7 @@ export function createPrismaAIPersistence(): AIPersistenceRepositories {
     },
     memory: {
       upsert: async (input) => {
+        assertJsonPayloadFreeOfCustomerPii(input.payloadJson, "AiMemoryRecord.payloadJson");
         const record = input.id
           ? await prisma.aiMemoryRecord.update({
               where: { id: input.id },

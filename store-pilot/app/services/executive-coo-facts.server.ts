@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import { loadUnifiedStoreMetricsForFacts } from "../ai/migration/unified-metrics-provider";
 import { loadLatestCollaborationOutputFromStore } from "../ai/collaboration/collaboration-persistence";
 import {
@@ -103,30 +104,27 @@ export function createPrismaExecutiveCooFactsSource(): ExecutiveCooFactsSource {
           select: { storeName: true },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: thirtyDaysAgo },
-          },
+          }),
           select: { totalPriceAmount: true },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
-          },
+          }),
           select: { totalPriceAmount: true },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: ninetyDaysAgo },
-          },
+          }),
           select: { totalPriceAmount: true },
         }),
         Promise.all(

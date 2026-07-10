@@ -6,10 +6,11 @@ import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
 
 import { BillingDashboard } from "../../components/billing/BillingDashboard";
-import { assertBillingConfigValid, validateBillingConfig } from "../billing-config-validator";
+import { assertBillingRegistryValid, validateBillingRegistry } from "../billing-config-validator";
 import { buildBillingDashboard } from "../billing-dashboard";
 import { getCanonicalPlan, listCanonicalPlans } from "../billing-limits";
 import { BILLING_CONFIG, BILLING_PLAN_SLUGS } from "../plan-config";
+import { PLAN_REGISTRY } from "../plan-registry";
 
 const billingRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const appRoot = join(billingRoot, "..");
@@ -33,11 +34,11 @@ function collectSourceFiles(directory: string, files: string[] = []): string[] {
 }
 
 describe("billing config validator", () => {
-  it("validates canonical billing configuration", () => {
-    const result = validateBillingConfig();
+  it("validates canonical billing registry", () => {
+    const result = validateBillingRegistry();
     expect(result.ok).toBe(true);
     expect(result.errors).toEqual([]);
-    expect(() => assertBillingConfigValid()).not.toThrow();
+    expect(() => assertBillingRegistryValid()).not.toThrow();
   });
 
   it("includes every plan in plans, limits, and features", () => {
@@ -56,27 +57,29 @@ describe("billing config validator", () => {
 });
 
 describe("billing single source of truth", () => {
-  it("derives plan pricing only from plan-config", () => {
+  it("derives plan pricing only from plan registry", () => {
     for (const slug of BILLING_PLAN_SLUGS) {
-      expect(getCanonicalPlan(slug).monthlyPriceUsd).toBe(BILLING_CONFIG.plans[slug].price);
+      expect(getCanonicalPlan(slug).monthlyPriceUsd).toBe(PLAN_REGISTRY[slug].monthlyPriceUsd);
+      expect(BILLING_CONFIG.plans[slug].price).toBe(PLAN_REGISTRY[slug].monthlyPriceUsd);
     }
     expect(listCanonicalPlans()).toHaveLength(BILLING_PLAN_SLUGS.length);
   });
 
-  it("does not hardcode plan prices outside plan-config.ts", () => {
+  it("does not hardcode plan prices outside plan-registry.ts", () => {
     const scanRoots = [billingRoot, join(appRoot, "components", "billing"), join(appRoot, "routes")];
     const offenders: string[] = [];
+    const allowedFiles = new Set(["plan-registry.ts", "plan-config.ts"]);
 
     for (const root of scanRoots) {
       for (const file of collectSourceFiles(root)) {
-        if (file.endsWith("plan-config.ts")) {
+        if (allowedFiles.has(file.split(/[/\\]/).pop() ?? "")) {
           continue;
         }
 
         const content = readFileSync(file, "utf8");
-        for (const price of ["29", "79", "199", "399"]) {
+        for (const price of ["29", "79", "199"]) {
           const pricePattern = new RegExp(`\\b${price}\\b`);
-          if (pricePattern.test(content) && !content.includes("plan-config")) {
+          if (pricePattern.test(content) && !content.includes("plan-registry")) {
             offenders.push(`${relative(appRoot, file)} contains hardcoded price ${price}`);
           }
         }
@@ -86,7 +89,7 @@ describe("billing single source of truth", () => {
     expect(offenders, offenders.join("\n")).toEqual([]);
   });
 
-  it("requires billing modules to import plan-config", () => {
+  it("requires billing modules to import registry or plan-config", () => {
     const directConfigModules = [
       "billing-limits.ts",
       "billing-entitlements.ts",
@@ -98,16 +101,22 @@ describe("billing single source of truth", () => {
 
     for (const moduleName of directConfigModules) {
       const content = readFileSync(join(billingRoot, moduleName), "utf8");
-      expect(content.includes("plan-config")).toBe(true);
+      expect(
+        content.includes("plan-registry") || content.includes("plan-config"),
+      ).toBe(true);
     }
 
     for (const moduleName of derivedConfigModules) {
       const content = readFileSync(join(billingRoot, moduleName), "utf8");
-      expect(content.includes("billing-limits") || content.includes("plan-config")).toBe(true);
+      expect(
+        content.includes("billing-limits") ||
+          content.includes("plan-config") ||
+          content.includes("plan-registry"),
+      ).toBe(true);
     }
   });
 
-  it("matches UI pricing to plan-config", async () => {
+  it("matches UI pricing to plan registry", async () => {
     const growth = getCanonicalPlan("growth");
     const html = renderToString(
       createElement(BillingDashboard, {
@@ -136,6 +145,12 @@ describe("billing single source of truth", () => {
             backgroundJobs: 0,
             dataExports: 0,
             storageMb: 0,
+            executiveBriefings: 0,
+            predictions: 0,
+            experiments: 0,
+            knowledgeGraphNodes: 0,
+            products: 0,
+            reports: 0,
           },
           limits: growth,
           usageChecks: {} as never,
@@ -147,6 +162,7 @@ describe("billing single source of truth", () => {
           canCancel: true,
           historyPlaceholder: true,
           invoicesPlaceholder: true,
+          workerQueueTier: "normal",
         },
       }),
     );
@@ -157,7 +173,7 @@ describe("billing single source of truth", () => {
 });
 
 describe("billing dashboard config alignment", () => {
-  it("builds dashboard plans from plan-config pricing", async () => {
+  it("builds dashboard plans from registry pricing", async () => {
     const { createTrialSubscription } = await import("../../services/billing.server");
     const { STORE_ID, testHarness } = await import("../../services/__tests__/helpers/fixtures");
 
@@ -167,7 +183,7 @@ describe("billing dashboard config alignment", () => {
 
     const dashboard = await buildBillingDashboard(STORE_ID);
     for (const plan of dashboard.plans) {
-      expect(plan.monthlyPriceUsd).toBe(BILLING_CONFIG.plans[plan.slug].price);
+      expect(plan.monthlyPriceUsd).toBe(PLAN_REGISTRY[plan.slug].monthlyPriceUsd);
     }
   });
 });

@@ -83,7 +83,7 @@ describe("F.3.3 Job Service Foundation", () => {
     const claim = await claimNextJob({ workerId: "worker-1" });
 
     expect(claim?.job.jobType).toBe("orders_historical");
-    expect(claim?.job.status).toBe("running");
+    expect(claim?.job.status).toBe("claimed");
     expect(claim?.job.attempts).toBe(1);
     expect(claim?.workerId).toBe("worker-1");
     expect(harness.getJobEvents(claim!.job.id).some((e) => e.eventType === "claimed")).toBe(
@@ -179,7 +179,7 @@ describe("F.3.3 Job Service Foundation", () => {
     const events = harness.getJobEvents(job.id);
     const eventTypes = events.map((event) => event.eventType);
 
-    expect(job.status).toBe("queued");
+    expect(job.status).toBe("retrying");
     expect(job.attempts).toBe(1);
     expect(job.availableAt.getTime()).toBeGreaterThan(Date.now());
     expect(eventTypes).toContain("failed");

@@ -18,6 +18,8 @@ export type MerchantOnboardingLoaderData = {
   status: OnboardingStatus;
   progressPercent: number;
   progressLabel: string | null;
+  pipelineState?: string;
+  currentJobStatus?: string | null;
   productSyncStatus: OnboardingPhaseStatus;
   inventorySyncStatus: OnboardingPhaseStatus;
   ordersSyncStatus: OnboardingPhaseStatus;
@@ -89,8 +91,9 @@ export function getPhaseLabel(
     case "completed":
     case "skipped":
       return `${name} synced`;
-    case "running":
     case "queued":
+      return `${name} queued`;
+    case "running":
       return `${name} syncing`;
     case "blocked":
       return phase === "orders"

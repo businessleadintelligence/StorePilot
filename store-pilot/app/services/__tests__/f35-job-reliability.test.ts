@@ -47,7 +47,7 @@ describe("F.3.5 Job Reliability Hardening", () => {
 
     expect(released).toHaveLength(1);
     expect(released[0]?.id).toBe(staleJob.id);
-    expect(released[0]?.status).toBe("queued");
+    expect(released[0]?.status).toBe("retrying");
     expect(released[0]?.lockedBy).toBeNull();
     expect(released[0]?.lockExpiresAt).toBeNull();
     expect(
@@ -125,7 +125,7 @@ describe("F.3.5 Job Reliability Hardening", () => {
     expect(result.action).toBe("enqueued");
     expect(onboarding?.currentJobId).toBe(result.jobId);
     expect(onboarding?.productSyncJobId).toBe(result.jobId);
-    expect(onboarding?.productSyncStatus).toBe("running");
+    expect(onboarding?.productSyncStatus).toBe("queued");
     expect(harness.dbState.syncJobs.size).toBe(1);
   });
 
@@ -142,7 +142,7 @@ describe("F.3.5 Job Reliability Hardening", () => {
 
     expect(result.action).toBe("retried");
     expect(onboarding?.onboardingRunId).not.toBe(beforeRunId);
-    expect(onboarding?.productSyncStatus).toBe("running");
+    expect(onboarding?.productSyncStatus).toBe("queued");
     expect(onboarding?.currentJobId).toBe(result.jobId);
     expect(harness.dbState.syncJobs.size).toBe(2);
     expect(
@@ -164,7 +164,7 @@ describe("F.3.5 Job Reliability Hardening", () => {
 
     expect(result.action).toBe("resumed");
     expect(harness.getOnboarding(STORE_ID)?.status).toBe("running");
-    expect(harness.getOnboarding(STORE_ID)?.productSyncStatus).toBe("running");
+    expect(harness.getOnboarding(STORE_ID)?.productSyncStatus).toBe("queued");
     expect(harness.dbState.syncJobs.size).toBe(2);
   });
 

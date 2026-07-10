@@ -15,6 +15,12 @@ function emptyUsage(storeId: string, month: string): BillingUsageSnapshot {
     backgroundJobs: 0,
     dataExports: 0,
     storageMb: 0,
+    executiveBriefings: 0,
+    predictions: 0,
+    experiments: 0,
+    knowledgeGraphNodes: 0,
+    products: 0,
+    reports: 0,
   };
 }
 

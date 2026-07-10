@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import { loadUnifiedStoreMetricsForFacts } from "../ai/migration/unified-metrics-provider";
 import type { GrowthIntelligenceFactsSource } from "../ai/facts/growth-intelligence-facts";
 
@@ -122,12 +123,11 @@ export function createPrismaGrowthIntelligenceFactsSource(): GrowthIntelligenceF
           },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: thirtyDaysAgo },
-          },
+          }),
           select: {
             id: true,
             metricDate: true,
@@ -136,21 +136,19 @@ export function createPrismaGrowthIntelligenceFactsSource(): GrowthIntelligenceF
           },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: sixtyDaysAgo, lt: thirtyDaysAgo },
-          },
+          }),
           select: { totalPriceAmount: true },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: ninetyDaysAgo },
-          },
+          }),
           select: { id: true, metricDate: true, totalPriceAmount: true },
         }),
         prisma.orderLineItem.findMany({

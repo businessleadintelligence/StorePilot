@@ -1,47 +1,35 @@
 import type { ActionFunctionArgs } from "react-router";
+
 import { validateWebhookRequest } from "../shopify.server";
-import db from "../db.server";
-import { deactivateStoreOnUninstall } from "../services/store.server";
-
-function logSessionCleanup(
-  level: "info" | "error",
-  message: string,
-  context: {
-    shop: string;
-    operation: string;
-    deletedCount?: number;
-    reason?: string;
-  },
-) {
-  const payload = { message, ...context };
-
-  if (level === "error") {
-    console.error("[session-cleanup]", payload);
-  } else {
-    console.info("[session-cleanup]", payload);
-  }
-}
+import { handleAppUninstalledWebhook } from "../services/store.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, topic } = await validateWebhookRequest(request);
+  const { shop, topic, webhookId } = await validateWebhookRequest(request);
+  const webhookTriggeredAtHeader = request.headers.get("X-Shopify-Triggered-At");
+  const webhookTriggeredAt = webhookTriggeredAtHeader
+    ? new Date(webhookTriggeredAtHeader)
+    : undefined;
 
   console.log(`Received ${topic} webhook for ${shop}`);
 
-  await deactivateStoreOnUninstall(shop);
+  const result = await handleAppUninstalledWebhook({
+    shop,
+    topic,
+    webhookId: webhookId ?? `${shop}:${topic}:${Date.now()}`,
+    webhookTriggeredAt:
+      webhookTriggeredAt && !Number.isNaN(webhookTriggeredAt.getTime())
+        ? webhookTriggeredAt
+        : undefined,
+  });
 
-  try {
-    const result = await db.session.deleteMany({ where: { shop } });
-    logSessionCleanup("info", "Sessions deleted", {
-      shop,
-      operation: "delete_sessions",
-      deletedCount: result.count,
-    });
-  } catch (error) {
-    logSessionCleanup("error", "Session cleanup failed", {
-      shop,
-      operation: "delete_sessions",
-      reason: error instanceof Error ? error.message : "unknown_error",
-    });
+  if (!result.success) {
+    if (result.retryable) {
+      return new Response(result.reason ?? "retryable_uninstall_failure", {
+        status: 500,
+      });
+    }
+
+    return new Response(result.reason ?? "uninstall_failed", { status: 422 });
   }
 
   return new Response();

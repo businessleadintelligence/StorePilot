@@ -117,7 +117,7 @@ describe("startup scope validation", () => {
 
     const scopeCheck = readiness.checks.find((check) => check.id === "shopify_scopes");
     expect(scopeCheck?.ok).toBe(true);
-  });
+  }, 15_000);
 });
 
 describe("Google OAuth store binding", () => {

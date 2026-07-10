@@ -24,6 +24,7 @@ import {
   getOrCreateStoreOnboarding,
 } from "./services/onboarding.server";
 import { ensureOrdersSchedulerActive } from "./services/orders-scheduler.server";
+import { bootstrapIntelligenceAfterAuth } from "./learning/scheduler/learning-bootstrap-scheduler";
 import { ensureStoreBackfillAfterReinstall } from "./services/store-backfill.server";
 import { upsertStoreFromSession } from "./services/store.server";
 import { upsertOwnerFromSession } from "./services/user.server";
@@ -144,6 +145,17 @@ const shopifyAppConfig = {
         await getOrCreateStoreOnboarding(store.id);
         await ensureStoreBackfillAfterReinstall(store.id);
         await ensureOrdersSchedulerActive(store.id);
+
+        try {
+          await bootstrapIntelligenceAfterAuth({ storeId: store.id, admin });
+        } catch (error) {
+          logAfterAuth("error", "Bootstrap intelligence profiling failed; continuing onboarding", {
+            shop: session.shop,
+            storeId: store.id,
+            operation: "onboarding_initialized",
+            reason: error instanceof Error ? error.message : "bootstrap_intelligence_failed",
+          });
+        }
 
         logAfterAuth("info", "Store onboarding initialized", {
           shop: session.shop,

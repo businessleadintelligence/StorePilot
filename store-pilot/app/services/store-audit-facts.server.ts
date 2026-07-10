@@ -1,4 +1,5 @@
 import prisma from "../db.server";
+import { orderWhereForMetrics } from "../lib/order-query-filters.server";
 import { loadUnifiedStoreMetricsForFacts } from "../ai/migration/unified-metrics-provider";
 import type { StoreAuditFactsSource } from "../ai/facts/store-audit-facts";
 
@@ -37,12 +38,11 @@ export function createPrismaStoreAuditFactsSource(): StoreAuditFactsSource {
           },
         }),
         prisma.order.findMany({
-          where: {
-            storeId,
+          where: orderWhereForMetrics(storeId, {
             cancelledAt: null,
             isTest: false,
             metricDate: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-          },
+          }),
           select: { totalPriceAmount: true },
         }),
         prisma.webhookEvent.groupBy({

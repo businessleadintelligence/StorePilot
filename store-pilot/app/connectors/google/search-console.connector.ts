@@ -5,7 +5,7 @@ import { getValidGoogleAccessToken } from "../../google/oauth/google-token.servi
 import {
   loadActiveGoogleIntegrationForGscConnector,
   markGoogleIntegrationRevoked,
-} from "../../services/google-integration.server";
+} from "../support/google-connector-integration.server";
 import type { NormalizedStoreMetrics } from "../normalization/normalized-metrics";
 import { computeConnectorDataQualityScore } from "../core/data-quality";
 import { AbstractConnector } from "../core/connector.interface";

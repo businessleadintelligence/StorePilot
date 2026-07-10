@@ -15,11 +15,16 @@ import {
 import { getCronWorkerHealth } from "../cron-worker.server";
 import { getJobQueueMetrics } from "../job.server";
 import { getStartupReadiness } from "../startup-readiness.server";
+import { getWorkerInfrastructureHealth } from "../worker-health.server";
 import prisma from "../../db.server";
 import { createDefaultAIPlatform } from "../../ai/providers/index";
 
 vi.mock("../cron-worker.server", () => ({
   getCronWorkerHealth: vi.fn(),
+}));
+
+vi.mock("../worker-health.server", () => ({
+  getWorkerInfrastructureHealth: vi.fn(),
 }));
 
 vi.mock("../job.server", () => ({
@@ -34,6 +39,27 @@ vi.mock("../../db.server", () => ({
   default: {
     $queryRaw: vi.fn(),
   },
+  getDatabaseMetricsSnapshot: vi.fn(() => ({
+    queryCount: 0,
+    slowQueryCount: 0,
+    retryCount: 0,
+    transactionCount: 0,
+    slowTransactionCount: 0,
+    connectionWaitMs: 0,
+    poolUtilizationEstimate: null,
+    averageQueryDurationMs: 0,
+    p95QueryDurationMs: 0,
+    recentSlowQueries: [],
+    recentSlowTransactions: [],
+  })),
+  auditDatabaseUrl: vi.fn(() => ({
+    usesSupabasePooler: true,
+    connectionLimit: 1,
+    poolTimeoutSeconds: 15,
+    pgbouncer: true,
+    warnings: [],
+    recommendations: [],
+  })),
 }));
 
 vi.mock("../../ai/providers/index", () => ({
@@ -52,6 +78,60 @@ beforeEach(() => {
   process.env.SHOPIFY_APP_URL = "https://store-pilot.test";
   process.env.SCOPES = "read_products,read_inventory,write_products,read_orders";
   process.env.CRON_SECRET = "cron-secret";
+
+  vi.mocked(getWorkerInfrastructureHealth).mockResolvedValue({
+    ok: true,
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    queue: {
+      queued: 0,
+      claimed: 0,
+      running: 0,
+      deadLetter: 0,
+      retrying: 0,
+      failed: 0,
+      cancelled: 0,
+    },
+    queueExtended: {
+      queued: 0,
+      claimed: 0,
+      running: 0,
+      deadLetter: 0,
+      retrying: 0,
+      failed: 0,
+      cancelled: 0,
+      queueDepth: 0,
+      oldestQueuedJobAgeMs: null,
+      longestQueuedJobId: null,
+      averageWaitTimeMs: null,
+      averageExecutionTimeMs: null,
+      totalRetryCount: 0,
+      throughputLastHour: 0,
+      byJobType: {},
+    },
+    workers: {
+      activeWorkers: 1,
+      drainingWorkers: 0,
+      staleWorkers: 0,
+      workers: [],
+    },
+    runtime: null,
+    processMetrics: {
+      cyclesCompleted: 0,
+      jobsProcessed: 0,
+      jobsFailed: 0,
+      lastCycleAt: null,
+      lastJobAt: null,
+      startedAt: new Date().toISOString(),
+      uptimeMs: 0,
+    },
+    cronFallback: {
+      cronSecretConfigured: true,
+      queueEnabled: true,
+    },
+    orphanJobs: [],
+    alerts: [],
+  });
 });
 
 describe("monitoring.server", () => {
@@ -110,9 +190,12 @@ describe("monitoring.server", () => {
   it("marks queue degraded when dead-letter jobs exist", async () => {
     vi.mocked(getJobQueueMetrics).mockResolvedValue({
       queued: 2,
+      claimed: 0,
       running: 1,
       deadLetter: 3,
       retrying: 0,
+      failed: 0,
+      cancelled: 0,
     });
 
     const check = await checkQueueHealth();
@@ -120,16 +203,59 @@ describe("monitoring.server", () => {
     expect(check.ok).toBe(true);
   });
 
-  it("aggregates worker health from cron and queue checks", async () => {
-    vi.mocked(getCronWorkerHealth).mockReturnValue({
-      cronSecretConfigured: true,
-      queueEnabled: true,
-    });
-    vi.mocked(getJobQueueMetrics).mockResolvedValue({
-      queued: 0,
-      running: 0,
-      deadLetter: 0,
-      retrying: 0,
+  it("aggregates worker health from infrastructure checks", async () => {
+    vi.mocked(getWorkerInfrastructureHealth).mockResolvedValue({
+      ok: true,
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      queue: {
+        queued: 0,
+        claimed: 0,
+        running: 0,
+        deadLetter: 0,
+        retrying: 0,
+        failed: 0,
+        cancelled: 0,
+      },
+      queueExtended: {
+        queued: 0,
+        claimed: 0,
+        running: 0,
+        deadLetter: 0,
+        retrying: 0,
+        failed: 0,
+        cancelled: 0,
+        queueDepth: 0,
+        oldestQueuedJobAgeMs: null,
+        longestQueuedJobId: null,
+        averageWaitTimeMs: null,
+        averageExecutionTimeMs: null,
+        totalRetryCount: 0,
+        throughputLastHour: 0,
+        byJobType: {},
+      },
+      workers: {
+        activeWorkers: 1,
+        drainingWorkers: 0,
+        staleWorkers: 0,
+        workers: [],
+      },
+      runtime: null,
+      processMetrics: {
+        cyclesCompleted: 0,
+        jobsProcessed: 0,
+        jobsFailed: 0,
+        lastCycleAt: null,
+        lastJobAt: null,
+        startedAt: new Date().toISOString(),
+        uptimeMs: 0,
+      },
+      cronFallback: {
+        cronSecretConfigured: true,
+        queueEnabled: true,
+      },
+      orphanJobs: [],
+      alerts: [],
     });
 
     const check = await checkWorkerHealth();
@@ -182,9 +308,12 @@ describe("monitoring.server", () => {
     });
     vi.mocked(getJobQueueMetrics).mockResolvedValue({
       queued: 0,
+      claimed: 0,
       running: 0,
       deadLetter: 0,
       retrying: 0,
+      failed: 0,
+      cancelled: 0,
     });
 
     const report = await getMonitoringReport();

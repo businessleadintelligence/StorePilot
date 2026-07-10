@@ -1,5 +1,5 @@
 import type { StoreAutomation } from "../automation/automation-types";
-import type { AutomationExecutionResult } from "../automation/automation-executor";
+import type { AutomationExecutionResult } from "./execution-result";
 import {
   assertWriteProductsPermission,
   resolveShopifyAdminContext,

@@ -13,6 +13,7 @@ import {
   testHarness,
 } from "./helpers/fixtures";
 import { createTrialSubscription } from "../billing.server";
+import { getResolvedPlanLimit } from "../../billing/plan-registry";
 import { BILLING_LIMIT_EXCEEDED } from "../billing-enforcement.server";
 import type { OrderNode } from "../orders.server";
 import {
@@ -91,11 +92,13 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
+const STARTER_PRODUCT_LIMIT = getResolvedPlanLimit("starter", "products");
+
 describe("F.6.1B FIX-B1 — billing enforcement", () => {
   describe("Product enforcement", () => {
     it("blocks new variant creates at plan limit but allows updates", async () => {
       await createTrialSubscription(STORE_ID, "starter");
-      seedProducts(1000);
+      seedProducts(STARTER_PRODUCT_LIMIT);
 
       const harness = testHarness();
       const newRow = normalizeVariantRow(productNode, newVariantNode);
@@ -103,7 +106,7 @@ describe("F.6.1B FIX-B1 — billing enforcement", () => {
 
       const blocked = await upsertVariantRow(STORE_ID, newRow!, "sync");
       expect(blocked).toEqual({ action: "limit_exceeded" });
-      expect(harness.dbState.products.size).toBe(1000);
+      expect(harness.dbState.products.size).toBe(STARTER_PRODUCT_LIMIT);
 
       harness.seedProduct({ shopifyVariantId: VARIANT_GID });
       const existingRow = normalizeVariantRow(productNode, trackedVariantNode);
@@ -113,7 +116,7 @@ describe("F.6.1B FIX-B1 — billing enforcement", () => {
 
     it("returns blocked sync result when historical product import hits limit", async () => {
       await createTrialSubscription(STORE_ID, "starter");
-      seedProducts(1000);
+      seedProducts(STARTER_PRODUCT_LIMIT);
 
       const harness = testHarness();
       harness.mockAdminGraphql.mockResolvedValue(
@@ -135,7 +138,7 @@ describe("F.6.1B FIX-B1 — billing enforcement", () => {
         blockedReason: BILLING_LIMIT_EXCEEDED,
       });
       expect(harness.getStore().lastProductsSyncAt).toBeNull();
-      expect(harness.dbState.products.size).toBe(1000);
+      expect(harness.dbState.products.size).toBe(STARTER_PRODUCT_LIMIT);
     });
   });
 
@@ -275,10 +278,10 @@ describe("F.6.1B FIX-B1 — billing enforcement", () => {
         success: false,
         blocked: true,
         blockedReason: BILLING_LIMIT_EXCEEDED,
-        blockedMessage: "Product plan limit reached (1000/1000)",
+        blockedMessage: `Product plan limit reached (${STARTER_PRODUCT_LIMIT}/${STARTER_PRODUCT_LIMIT})`,
         productPages: 1,
-        productsProcessed: 1000,
-        variantsProcessed: 1000,
+        productsProcessed: STARTER_PRODUCT_LIMIT,
+        variantsProcessed: STARTER_PRODUCT_LIMIT,
         upserted: 0,
         skipped: 1,
       });
