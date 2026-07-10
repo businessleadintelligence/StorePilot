@@ -60,7 +60,7 @@ async function lockSubscriptionForBilling(
   storeId: string,
 ): Promise<void> {
   await tx.$queryRaw`
-    SELECT id FROM subscriptions WHERE store_id = ${storeId}::uuid FOR UPDATE
+    SELECT id FROM subscriptions WHERE "storeId" = ${storeId}::uuid FOR UPDATE
   `;
 }
 
