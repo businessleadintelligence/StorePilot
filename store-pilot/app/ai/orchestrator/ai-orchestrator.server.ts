@@ -1,11 +1,10 @@
 import type { z } from "zod";
 
-import { join } from "node:path";
-
 import { loadAIConfig, toRequestConfig } from "../core/ai-config";
 import { AIPlatformError, isAIPlatformError } from "../core/ai-errors";
 import type { AIProvider } from "../core/ai-provider";
 import type { AIStructuredResponse } from "../core/ai-types";
+import { resolveDefaultPromptsDirectory } from "../foundation/prompt-registry/store";
 import { createDefaultAIPlatform } from "../providers";
 import {
   buildCacheFingerprint,
@@ -542,7 +541,7 @@ export function createAIOrchestrator(
   const loadPrompt =
     deps?.loadPrompt ??
     createFilePromptLoader({
-      promptsDirectory: join(process.cwd(), "app", "ai", "prompts"),
+      promptsDirectory: resolveDefaultPromptsDirectory(),
     }).load;
 
   return new AIOrchestrator({

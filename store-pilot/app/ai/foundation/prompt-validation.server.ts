@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import { listRegisteredAgents } from "../agents/agent-registry";
 import { createDefaultPromptRegistry } from "./prompt-registry";
 import type { PromptRegistryStore } from "./prompt-registry/registry";
@@ -17,9 +15,7 @@ export type PromptRegistryValidationResult = {
 };
 
 export function validateFoundationPromptRegistry(
-  registry: PromptRegistryStore = createDefaultPromptRegistry({
-    promptsDirectory: join(process.cwd(), "app", "ai", "prompts"),
-  }),
+  registry: PromptRegistryStore = createDefaultPromptRegistry(),
 ): PromptRegistryValidationResult {
   const missingPromptIds: string[] = [];
 

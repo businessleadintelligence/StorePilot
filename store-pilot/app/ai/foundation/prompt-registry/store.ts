@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parsePromptFile } from "../../prompts/prompt-loader";
 import type { FoundationPromptDefinition } from "../types/foundation-types";
@@ -93,12 +94,40 @@ export function createDefaultPromptRegistry(
   return new FileBackedPromptRegistry({ ...options, promptsDirectory });
 }
 
-function resolveDefaultPromptsDirectory(): string {
+export function resolveDefaultPromptsDirectory(): string {
   const candidates = [
     join(process.cwd(), "app", "ai", "prompts"),
     join(process.cwd(), "build", "server", "app", "ai", "prompts"),
+    join(
+      process.cwd(),
+      "store-pilot",
+      "build",
+      "server",
+      "app",
+      "ai",
+      "prompts",
+    ),
     join(process.cwd(), "store-pilot", "app", "ai", "prompts"),
   ];
+
+  try {
+    if (typeof import.meta !== "undefined" && import.meta.url) {
+      candidates.unshift(
+        join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "prompts"),
+        join(
+          fileURLToPath(new URL(".", import.meta.url)),
+          "..",
+          "..",
+          "..",
+          "app",
+          "ai",
+          "prompts",
+        ),
+      );
+    }
+  } catch {
+    // ignore — non-ESM runtime
+  }
 
   try {
     const serverRoot = join(process.cwd(), "build", "server");
