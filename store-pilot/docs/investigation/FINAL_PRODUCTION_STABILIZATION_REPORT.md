@@ -2,6 +2,7 @@
 
 **Date:** 2026-07-11  
 **Sprint:** P0 Production Stabilization  
+**Commit:** `fc49240` (pushed to `main`)  
 **Deployment target:** https://store-pilot-eta.vercel.app
 
 ---
@@ -38,11 +39,14 @@ This sprint **fixed the verified SQL bug**, added regression tests, and produced
 
 ---
 
-## Production health (spot check)
+## Production health (post-push spot check)
 
 | Endpoint | Status |
 |----------|--------|
+| `/health` | ✅ 200 |
 | `/health/ready` | ✅ 200 |
+| `/health/worker` | ✅ 200 |
+| `/health/monitor` | ✅ 200 |
 
 ---
 
@@ -56,7 +60,7 @@ This sprint **fixed the verified SQL bug**, added regression tests, and produced
 | Dashboard opens for new merchant | ⏳ **NOT VERIFIED** (prior SSR fixes deployed; needs MV-1) |
 | Faster initial render (before/after timings) | ⏳ **NOT VERIFIED** |
 | typecheck / lint / test / build pass | ✅ **VERIFIED** |
-| Health endpoints green after deploy | ⏳ Pending this sprint's deploy |
+| Health endpoints green after deploy | ✅ **VERIFIED** (post-push spot check) |
 
 ---
 
