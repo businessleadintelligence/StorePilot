@@ -31,12 +31,9 @@ import {
   deferIntelligenceSection,
   getRequestLogContext,
   logRouteLoader,
+  timeLoaderSection,
 } from "../lib/route-loader-log.server";
-import {
-  authenticateAdminOnce,
-  getSessionShop,
-} from "../lib/request-auth.server";
-import prisma from "../db.server";
+import { resolveRequestStoreContext } from "../lib/request-auth.server";
 import {
   calculateExecutiveBrief,
   serializeExecutiveBriefForLoader,
@@ -194,34 +191,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { route, requestId } = getRequestLogContext(request);
 
   try {
-    const { session } = await authenticateAdminOnce(request);
-    const shop = getSessionShop(session) ?? null;
+    const logContext = { route, requestId, shop: null as string | null, storeId: undefined as string | undefined };
 
-    if (!shop) {
+    const storeContext = await timeLoaderSection("authenticateAndResolveStore", logContext, () =>
+      resolveRequestStoreContext(request),
+    );
+
+    if (!storeContext) {
       return EMPTY_SHELL;
     }
 
-    const store = await prisma.store.findUnique({
-      where: { shopifyDomain: shop },
-      select: { id: true, currency: true },
-    });
+    const { shop, storeId, currency } = storeContext;
+    logContext.shop = shop;
+    logContext.storeId = storeId;
 
-    if (!store) {
-      logRouteLoader("info", "Dashboard shell — store not found yet", {
-        route,
-        function: "loader",
-        shop,
-        requestId,
-        operation: "dashboard_empty_shell",
-      });
-      return EMPTY_SHELL;
-    }
-
-    const [onboarding, syncStatus, metrics] = await Promise.all([
-      getOnboardingStatus(store.id),
-      getStoreSyncStatus(store.id),
-      getStoreMetrics(store.id),
-    ]);
+    const [onboarding, syncStatus, metrics] = await timeLoaderSection(
+      "dashboardShellParallel",
+      logContext,
+      () =>
+        Promise.all([
+          getOnboardingStatus(storeId),
+          getStoreSyncStatus(storeId),
+          getStoreMetrics(storeId, { nonBlocking: true }),
+        ]),
+    );
 
     const healthScore = calculateStoreHealthScore(metrics);
     const serializedOnboarding = serializeOnboardingForLoader(onboarding);
@@ -236,7 +229,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       route,
       function: "loader",
       shop,
-      storeId: store.id,
+      storeId: storeId,
       requestId,
       operation: loadIntelligence
         ? "dashboard_data_with_intelligence"
@@ -254,7 +247,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           metrics,
           healthScore,
           syncStatus,
-          currency: store.currency,
+          currency,
         }),
       ),
       insights: serializeInsightsForLoader(
@@ -271,10 +264,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           healthScore,
         }),
       ),
-      currency: store.currency,
+      currency,
       deferIntelligenceLoad: !loadIntelligence,
       ...(loadIntelligence
-        ? loadIntelligenceSections(store.id, store.currency, {
+        ? loadIntelligenceSections(storeId, currency, {
             shop,
             route,
             requestId,

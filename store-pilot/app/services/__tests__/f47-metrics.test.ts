@@ -186,4 +186,19 @@ describe("F.4.7 Metrics Service", () => {
     expect(formatMetricNumber(173)).toBe("173");
     expect(formatMetricNumber(0)).toBe("0");
   });
+
+  it("9. returns empty metrics immediately on cache miss when nonBlocking", async () => {
+    const metrics = await getStoreMetrics(STORE_ID, { nonBlocking: true });
+
+    expect(metrics).toEqual({
+      products: 0,
+      activeProducts: 0,
+      orders: 0,
+      grossRevenue: 0,
+      averageOrderValue: 0,
+      lowStockProducts: 0,
+      outOfStockProducts: 0,
+      inventoryUnits: 0,
+    });
+  });
 });

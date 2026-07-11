@@ -250,12 +250,24 @@ function isCacheFresh(computedAt: Date, ttlMs: number): boolean {
   return Date.now() - computedAt.getTime() <= ttlMs;
 }
 
-export async function getStoreMetrics(storeId: string): Promise<StoreMetrics> {
+export type GetStoreMetricsOptions = {
+  /**
+   * When true, never block on cache miss — returns EMPTY_METRICS and schedules
+   * background recompute. Use on dashboard shell for fast first paint.
+   */
+  nonBlocking?: boolean;
+};
+
+export async function getStoreMetrics(
+  storeId: string,
+  options?: GetStoreMetricsOptions,
+): Promise<StoreMetrics> {
   if (!storeId) {
     return { ...EMPTY_METRICS };
   }
 
   const ttlMs = resolveMetricsCacheTtlMs();
+  const nonBlocking = options?.nonBlocking === true;
 
   try {
     const cached = await prisma.storeMetricsCache.findUnique({
@@ -271,9 +283,18 @@ export async function getStoreMetrics(storeId: string): Promise<StoreMetrics> {
       return mapCacheRowToMetrics(cached);
     }
 
+    if (nonBlocking) {
+      void recomputeStoreMetricsCache(storeId).catch(() => undefined);
+      return { ...EMPTY_METRICS };
+    }
+
     return await recomputeStoreMetricsCache(storeId);
   } catch {
     try {
+      if (nonBlocking) {
+        void recomputeStoreMetricsCache(storeId).catch(() => undefined);
+        return { ...EMPTY_METRICS };
+      }
       return await computeStoreMetricsLive(storeId);
     } catch {
       return { ...EMPTY_METRICS };

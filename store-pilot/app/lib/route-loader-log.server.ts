@@ -61,3 +61,29 @@ export function deferIntelligenceSection<T>(
     return null;
   });
 }
+
+export async function timeLoaderSection<T>(
+  section: string,
+  context: {
+    route: string;
+    shop?: string | null;
+    storeId?: string;
+    requestId?: string | null;
+  },
+  load: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    return await load();
+  } finally {
+    logRouteLoader("info", "Loader section timing", {
+      route: context.route,
+      function: section,
+      shop: context.shop ?? null,
+      storeId: context.storeId,
+      requestId: context.requestId ?? null,
+      operation: "loader_section_timing",
+      reason: `${Date.now() - startedAt}ms`,
+    });
+  }
+}

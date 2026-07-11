@@ -25,47 +25,39 @@ import {
 import {
   authenticateAdminOnce,
   getSessionShop,
+  resolveRequestStoreContext,
 } from "../lib/request-auth.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticateAdminOnce(request);
-  const shop = getSessionShop(session);
+  const storeContext = await resolveRequestStoreContext(request);
 
-  if (!shop) {
+  if (!storeContext) {
     return { dashboard: null, onboardingReminders: [] };
   }
 
-  const store = await prisma.store.findUnique({
-    where: { shopifyDomain: shop },
-    select: { id: true, currency: true },
-  });
+  const { storeId, currency, shop } = storeContext;
 
-  if (!store) {
-    return { dashboard: null, onboardingReminders: [] };
-  }
-
-  const onboardingReminders = serializeMerchantOnboardingRemindersForLoader(
-    await getOnboardingReminders(store.id),
-  );
-
-  let dashboard = null;
-  try {
-    dashboard = serializeExecutiveDashboardForLoader(
-      await getExecutiveDashboard(store.id, store.currency),
-    );
-  } catch (error) {
-    console.error("[coo-dashboard]", {
-      message: "Executive COO dashboard loader failed",
-      storeId: store.id,
-      shop,
-      reason: error instanceof Error ? error.message : "unknown_error",
-    });
-  }
+  const [onboardingRemindersRaw, executiveDashboardRaw] = await Promise.all([
+    getOnboardingReminders(storeId),
+    getExecutiveDashboard(storeId, currency).catch((error: unknown) => {
+      console.error("[coo-dashboard]", {
+        message: "Executive COO dashboard loader failed",
+        storeId,
+        shop,
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+      return null;
+    }),
+  ]);
 
   return {
-    dashboard,
-    onboardingReminders,
+    dashboard: executiveDashboardRaw
+      ? serializeExecutiveDashboardForLoader(executiveDashboardRaw)
+      : null,
+    onboardingReminders: serializeMerchantOnboardingRemindersForLoader(
+      onboardingRemindersRaw,
+    ),
   };
 };
 

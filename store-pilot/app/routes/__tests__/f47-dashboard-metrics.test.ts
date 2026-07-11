@@ -4,12 +4,10 @@ import { loader } from "../app._index";
 import { getOnboardingStatus } from "../../services/onboarding-ui.server";
 import { getStoreMetrics } from "../../services/metrics.server";
 import { getStoreSyncStatus } from "../../services/sync-status.server";
-import { authenticate } from "../../shopify.server";
+import { resolveRequestStoreContext } from "../../lib/request-auth.server";
 
-vi.mock("../../shopify.server", () => ({
-  authenticate: {
-    admin: vi.fn(),
-  },
+vi.mock("../../lib/request-auth.server", () => ({
+  resolveRequestStoreContext: vi.fn(),
 }));
 
 vi.mock("../../onboarding/onboarding-service", () => ({
@@ -51,6 +49,12 @@ vi.mock("../../services/metrics.server", async (importOriginal) => {
 
 const SHOP = "storepilot-test.myshopify.com";
 const STORE_ID = "store-test-001";
+const STORE_CONTEXT = {
+  shop: SHOP,
+  storeId: STORE_ID,
+  currency: "USD",
+  store: { id: STORE_ID, currency: "USD", shopifyDomain: SHOP },
+};
 
 function createRequest(): Request {
   return new Request("http://localhost/app");
@@ -62,9 +66,7 @@ beforeEach(() => {
 
 describe("F.4.7 Dashboard Metrics Loader", () => {
   it("1. returns null metrics when store is missing", async () => {
-    vi.mocked(authenticate.admin).mockResolvedValue({
-      session: { shop: "missing-shop.myshopify.com" },
-    } as unknown as Awaited<ReturnType<typeof authenticate.admin>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(null);
 
     const data = await loader({
       request: createRequest(),
@@ -77,9 +79,7 @@ describe("F.4.7 Dashboard Metrics Loader", () => {
   });
 
   it("2. loads serialized metrics for active store", async () => {
-    vi.mocked(authenticate.admin).mockResolvedValue({
-      session: { shop: SHOP },
-    } as unknown as Awaited<ReturnType<typeof authenticate.admin>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(STORE_CONTEXT);
     vi.mocked(getOnboardingStatus).mockResolvedValue(null);
     vi.mocked(getStoreSyncStatus).mockResolvedValue({
       onboardingStatus: null,
@@ -108,7 +108,7 @@ describe("F.4.7 Dashboard Metrics Loader", () => {
       request: createRequest(),
     } as Parameters<typeof loader>[0]);
 
-    expect(getStoreMetrics).toHaveBeenCalledWith(STORE_ID);
+    expect(getStoreMetrics).toHaveBeenCalledWith(STORE_ID, { nonBlocking: true });
     expect(data.metrics).toEqual({
       products: 27,
       activeProducts: 27,

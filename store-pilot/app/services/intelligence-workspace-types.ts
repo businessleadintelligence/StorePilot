@@ -181,4 +181,6 @@ export type IntelligenceWorkspaceLoaderData = {
   timeline: TimelineEventView[];
   currency: string;
   featureGate?: FeatureGateViewModel | null;
+  /** Document SSR returns shell only; client revalidates via `.data`. */
+  deferWorkspaceLoad?: boolean;
 };

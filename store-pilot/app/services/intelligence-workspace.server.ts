@@ -1,7 +1,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 
 import prisma from "../db.server";
-import { authenticate } from "../shopify.server";
+import { resolveRequestStoreContext } from "../lib/request-auth.server";
+import { isReactRouterDataRequest } from "../lib/react-router-request.server";
 import {
   getExecutiveDecisions,
   getOperationsQueue,
@@ -63,17 +64,31 @@ export type {
 } from "./intelligence-workspace-types";
 
 export async function resolveStoreContext(request: Request): Promise<StoreContext | null> {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
-  if (!shop) return null;
+  const ctx = await resolveRequestStoreContext(request);
+  if (!ctx) {
+    return null;
+  }
 
-  const store = await prisma.store.findUnique({
-    where: { shopifyDomain: shop },
-    select: { id: true, currency: true },
-  });
-  if (!store) return null;
+  return { storeId: ctx.storeId, currency: ctx.currency };
+}
 
-  return { storeId: store.id, currency: store.currency };
+const EMPTY_WORKSPACE_LOADER: IntelligenceWorkspaceLoaderData = {
+  workspace: null,
+  searchResults: [],
+  timeline: [],
+  currency: "USD",
+};
+
+function workspaceShellOnly(currency: string): IntelligenceWorkspaceLoaderData & {
+  deferWorkspaceLoad: true;
+} {
+  return {
+    workspace: null,
+    searchResults: [],
+    timeline: [],
+    currency,
+    deferWorkspaceLoad: true,
+  };
 }
 
 export async function buildGlobalSearch(storeId: string): Promise<SearchResultView[]> {
@@ -201,8 +216,8 @@ async function loadWorkspaceShell(ctx: StoreContext) {
 }
 
 export async function getExecutiveWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [executive, decisions, queue, stability, merchant, memory] = await Promise.all([
+  const [shell, executive, decisions, queue, stability, merchant, memory] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getExecutiveDashboardForUi(ctx.storeId, ctx.currency),
     getExecutiveDecisions(ctx.storeId),
     getOperationsQueue(ctx.storeId),
@@ -229,7 +244,6 @@ export async function getDomainWorkspaceData(
   ctx: StoreContext,
   domain: "inventory" | "pricing" | "seo",
 ): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
   const predictionFilter =
     domain === "inventory"
       ? ["inventory_stockout", "operational_supplier_delay"]
@@ -245,7 +259,8 @@ export async function getDomainWorkspaceData(
         ? ["revenue_decrease"]
         : ["traffic_loss"];
 
-  const [predictions, rootCauses, experiments, graphNodes, patterns] = await Promise.all([
+  const [shell, predictions, rootCauses, experiments, graphNodes, patterns] = await Promise.all([
+    loadWorkspaceShell(ctx),
     prisma.prediction.findMany({
       where: { storeId: ctx.storeId, active: true, predictionType: { in: predictionFilter as never[] } },
       orderBy: { rankScore: "desc" },
@@ -309,8 +324,8 @@ export async function getDomainWorkspaceData(
 }
 
 export async function getRootCausesWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [items, causes, timelineRaw, graphNodes] = await Promise.all([
+  const [shell, items, causes, timelineRaw, graphNodes] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getRootCauseUiItems(ctx.storeId),
     getRootCauses(ctx.storeId),
     getBusinessTimeline(ctx.storeId),
@@ -333,8 +348,8 @@ export async function getRootCausesWorkspaceData(ctx: StoreContext): Promise<Int
 }
 
 export async function getPredictionsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [items, predictions, stability] = await Promise.all([
+  const [shell, items, predictions, stability] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getPredictionUiItems(ctx.storeId),
     getPredictions(ctx.storeId),
     getBusinessStability(ctx.storeId),
@@ -351,8 +366,8 @@ export async function getPredictionsWorkspaceData(ctx: StoreContext): Promise<In
 }
 
 export async function getExperimentsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [items, recommendations] = await Promise.all([
+  const [shell, items, recommendations] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getExperimentUiItems(ctx.storeId),
     getExperimentRecommendations(ctx.storeId),
   ]);
@@ -365,8 +380,8 @@ export async function getExperimentsWorkspaceData(ctx: StoreContext): Promise<In
 export async function getMerchantIntelligenceWorkspaceData(
   ctx: StoreContext,
 ): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [dashboard, profile, dna, journal, confidence] = await Promise.all([
+  const [shell, dashboard, profile, dna, journal, confidence] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getMerchantIntelligenceDashboardForUi(ctx.storeId),
     getMerchantProfile(ctx.storeId),
     getLatestBusinessDna(ctx.storeId),
@@ -382,8 +397,8 @@ export async function getMerchantIntelligenceWorkspaceData(
 export async function getBusinessMemoryWorkspaceData(
   ctx: StoreContext,
 ): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const [memory, snapshots, patterns, confidence, dnaVersions] = await Promise.all([
+  const [shell, memory, snapshots, patterns, confidence, dnaVersions] = await Promise.all([
+    loadWorkspaceShell(ctx),
     getHistoricalMemory(ctx.storeId),
     getHistoricalSnapshots(ctx.storeId),
     getPatternSeeds(ctx.storeId),
@@ -406,9 +421,9 @@ export async function getBusinessMemoryWorkspaceData(
 export async function getKnowledgeGraphWorkspaceData(
   ctx: StoreContext,
 ): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
   const api = createKnowledgeGraphApi();
-  const [stats, nodes] = await Promise.all([
+  const [shell, stats, nodes] = await Promise.all([
+    loadWorkspaceShell(ctx),
     api.getStatistics(ctx.storeId),
     buildGraphNodes(ctx.storeId, 50),
   ]);
@@ -424,12 +439,14 @@ export async function getKnowledgeGraphWorkspaceData(
 }
 
 export async function getProductsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const products = await prisma.product.findMany({
-    where: { storeId: ctx.storeId, status: "active" },
-    orderBy: { updatedAt: "desc" },
-    take: 50,
-  });
+  const [shell, products] = await Promise.all([
+    loadWorkspaceShell(ctx),
+    prisma.product.findMany({
+      where: { storeId: ctx.storeId, status: "active" },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+    }),
+  ]);
   return {
     ...shell,
     workspace: {
@@ -453,13 +470,17 @@ export async function getProductDetailWorkspaceData(
     where: { id: productId, storeId: ctx.storeId },
   });
   if (!product) {
-    const shell = await loadWorkspaceShell(ctx);
-    return { ...shell, workspace: null };
+    return {
+      searchResults: [],
+      timeline: [],
+      currency: ctx.currency,
+      workspace: null,
+    };
   }
 
-  const shell = await loadWorkspaceShell(ctx);
   const api = createKnowledgeGraphApi();
-  const [graph, predictions, experiments] = await Promise.all([
+  const [shell, graph, predictions, experiments] = await Promise.all([
+    loadWorkspaceShell(ctx),
     api.getProductGraph(ctx.storeId, product.shopifyProductId).catch(() => null),
     prisma.prediction.findMany({
       where: { storeId: ctx.storeId, active: true },
@@ -507,12 +528,14 @@ export async function getProductDetailWorkspaceData(
 }
 
 export async function getCollectionsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const collections = await prisma.knowledgeGraphNode.findMany({
-    where: { storeId: ctx.storeId, nodeType: "Collection" },
-    orderBy: { updatedAt: "desc" },
-    take: 30,
-  });
+  const [shell, collections] = await Promise.all([
+    loadWorkspaceShell(ctx),
+    prisma.knowledgeGraphNode.findMany({
+      where: { storeId: ctx.storeId, nodeType: "Collection" },
+      orderBy: { updatedAt: "desc" },
+      take: 30,
+    }),
+  ]);
   return {
     ...shell,
     workspace: {
@@ -527,8 +550,10 @@ export async function getCollectionsWorkspaceData(ctx: StoreContext): Promise<In
 }
 
 export async function getTimelineWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const shell = await loadWorkspaceShell(ctx);
-  const journal = await getDecisionJournal(ctx.storeId, 20);
+  const [shell, journal] = await Promise.all([
+    loadWorkspaceShell(ctx),
+    getDecisionJournal(ctx.storeId, 20),
+  ]);
   return {
     ...shell,
     workspace: { kind: "timeline", timeline: shell.timeline, journalCount: journal.length },
@@ -541,7 +566,10 @@ export function createIntelligenceWorkspaceLoader(
   return async ({ request }: LoaderFunctionArgs) => {
     const ctx = await resolveStoreContext(request);
     if (!ctx) {
-      return { workspace: null, searchResults: [], timeline: [], currency: "USD" };
+      return EMPTY_WORKSPACE_LOADER;
+    }
+    if (!isReactRouterDataRequest(request)) {
+      return workspaceShellOnly(ctx.currency);
     }
     return builder(ctx);
   };
@@ -555,10 +583,14 @@ export function createFeatureGatedWorkspaceLoader(input: {
     const ctx = await resolveStoreContext(request);
     if (!ctx) {
       return {
-        workspace: null,
-        searchResults: [],
-        timeline: [],
-        currency: "USD",
+        ...EMPTY_WORKSPACE_LOADER,
+        featureGate: null,
+      };
+    }
+
+    if (!isReactRouterDataRequest(request)) {
+      return {
+        ...workspaceShellOnly(ctx.currency),
         featureGate: null,
       };
     }

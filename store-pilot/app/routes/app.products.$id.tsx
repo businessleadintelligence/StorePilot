@@ -1,24 +1,33 @@
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import { useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { IntelligenceWorkspaceRoute } from "../components/intelligence/IntelligenceWorkspaceRoute";
+import { isReactRouterDataRequest } from "../lib/react-router-request.server";
 import {
   getProductDetailWorkspaceData,
   resolveStoreContext,
 } from "../services/intelligence-workspace.server";
-import { renderIntelligenceWorkspace } from "../services/intelligence-workspace-views";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const ctx = await resolveStoreContext(request);
   if (!ctx || !params.id) {
     return { workspace: null, searchResults: [], timeline: [], currency: "USD" };
   }
+  if (!isReactRouterDataRequest(request)) {
+    return {
+      workspace: null,
+      searchResults: [],
+      timeline: [],
+      currency: ctx.currency,
+      deferWorkspaceLoad: true,
+    };
+  }
   return getProductDetailWorkspaceData(ctx, params.id);
 };
 
 export default function ProductDetailWorkspaceRoute() {
-  const data = useLoaderData<typeof loader>();
-  return renderIntelligenceWorkspace(data);
+  return <IntelligenceWorkspaceRoute />;
 }
 
 export function ErrorBoundary() {

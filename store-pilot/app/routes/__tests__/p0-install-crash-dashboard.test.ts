@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loader } from "../app._index";
 import { getOnboardingStatus } from "../../services/onboarding-ui.server";
-import { authenticateAdminOnce } from "../../lib/request-auth.server";
+import { resolveRequestStoreContext } from "../../lib/request-auth.server";
 import { getLearningBootstrapForUi } from "../../services/learning-ui.server";
 import { getQuickWinsForDashboard } from "../../services/quick-wins-ui.server";
 import { getExecutiveDashboardForUi } from "../../services/executive-ui.server";
@@ -14,6 +14,7 @@ import { getMerchantIntelligenceDashboardForUi } from "../../services/merchant-i
 vi.mock("../../lib/request-auth.server", () => ({
   authenticateAdminOnce: vi.fn(),
   getSessionShop: (session: { shop?: string }) => session.shop,
+  resolveRequestStoreContext: vi.fn(),
 }));
 
 vi.mock("../../onboarding/onboarding-service", () => ({
@@ -60,6 +61,16 @@ vi.mock("../../services/merchant-intelligence-ui.server", () => ({
 
 const SHOP = "storepilot-test.myshopify.com";
 const STORE_ID = "store-test-001";
+const STORE_CONTEXT = {
+  shop: SHOP,
+  storeId: STORE_ID,
+  currency: "USD",
+  store: { id: STORE_ID, currency: "USD", shopifyDomain: SHOP },
+};
+
+function mockActiveStoreContext() {
+  vi.mocked(resolveRequestStoreContext).mockResolvedValue(STORE_CONTEXT);
+}
 
 function createRequest(path = "http://localhost/app"): Request {
   return new Request(path);
@@ -71,9 +82,7 @@ beforeEach(() => {
 
 describe("P0 install crash — dashboard intelligence SSR guard", () => {
   it("does not invoke intelligence loaders on document SSR requests", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: SHOP },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    mockActiveStoreContext();
     vi.mocked(getOnboardingStatus).mockResolvedValue({
       status: "running",
       progressPercent: 10,
@@ -104,9 +113,7 @@ describe("P0 install crash — dashboard intelligence SSR guard", () => {
   });
 
   it("loads intelligence sections on React Router data requests", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: SHOP },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    mockActiveStoreContext();
     vi.mocked(getOnboardingStatus).mockResolvedValue({
       status: "running",
       progressPercent: 10,

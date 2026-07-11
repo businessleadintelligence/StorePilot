@@ -91,7 +91,7 @@ describe("Executive intelligence workspace loader", () => {
     });
 
     const result = await loader({
-      request: new Request("http://localhost/app/executive"),
+      request: new Request("http://localhost/app/executive.data"),
       params: {},
       context: {},
       url: new URL("http://localhost/app/executive"),

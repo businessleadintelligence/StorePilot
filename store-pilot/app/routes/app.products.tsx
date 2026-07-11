@@ -1,18 +1,17 @@
 import type { HeadersFunction } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import { useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { IntelligenceWorkspaceRoute } from "../components/intelligence/IntelligenceWorkspaceRoute";
 import {
   createIntelligenceWorkspaceLoader,
   getProductsWorkspaceData,
 } from "../services/intelligence-workspace.server";
-import { renderIntelligenceWorkspace } from "../services/intelligence-workspace-views";
 
 export const loader = createIntelligenceWorkspaceLoader(getProductsWorkspaceData);
 
 export default function ProductsWorkspaceRoute() {
-  const data = useLoaderData<typeof loader>();
-  return renderIntelligenceWorkspace(data);
+  return <IntelligenceWorkspaceRoute />;
 }
 
 export function ErrorBoundary() {

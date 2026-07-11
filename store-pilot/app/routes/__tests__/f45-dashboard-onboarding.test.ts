@@ -2,11 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loader } from "../app._index";
 import { getOnboardingStatus } from "../../services/onboarding-ui.server";
-import { authenticateAdminOnce } from "../../lib/request-auth.server";
+import { resolveRequestStoreContext } from "../../lib/request-auth.server";
 
 vi.mock("../../lib/request-auth.server", () => ({
   authenticateAdminOnce: vi.fn(),
   getSessionShop: (session: { shop?: string }) => session.shop,
+  resolveRequestStoreContext: vi.fn(),
 }));
 
 vi.mock("../../onboarding/onboarding-service", () => ({
@@ -30,6 +31,12 @@ vi.mock("../../services/onboarding-ui.server", async (importOriginal) => {
 
 const SHOP = "storepilot-test.myshopify.com";
 const STORE_ID = "store-test-001";
+const STORE_CONTEXT = {
+  shop: SHOP,
+  storeId: STORE_ID,
+  currency: "USD",
+  store: { id: STORE_ID, currency: "USD", shopifyDomain: SHOP },
+};
 
 function createRequest(): Request {
   return new Request("http://localhost/app");
@@ -41,9 +48,7 @@ beforeEach(() => {
 
 describe("F.4.5 Dashboard Onboarding Loader", () => {
   it("1. returns null onboarding when shop session is missing", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: undefined },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(null);
 
     const data = await loader({
       request: createRequest(),
@@ -58,9 +63,7 @@ describe("F.4.5 Dashboard Onboarding Loader", () => {
   });
 
   it("2. returns null onboarding when store is missing", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: "missing-shop.myshopify.com" },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(null);
 
     const data = await loader({
       request: createRequest(),
@@ -75,9 +78,7 @@ describe("F.4.5 Dashboard Onboarding Loader", () => {
   });
 
   it("3. loads serialized onboarding for active store", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: SHOP },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(STORE_CONTEXT);
     vi.mocked(getOnboardingStatus).mockResolvedValue({
       status: "running",
       progressPercent: 66,
@@ -111,9 +112,7 @@ describe("F.4.5 Dashboard Onboarding Loader", () => {
   });
 
   it("4. does not expose internal onboarding fields beyond loader contract", async () => {
-    vi.mocked(authenticateAdminOnce).mockResolvedValue({
-      session: { shop: SHOP },
-    } as unknown as Awaited<ReturnType<typeof authenticateAdminOnce>>);
+    vi.mocked(resolveRequestStoreContext).mockResolvedValue(STORE_CONTEXT);
     vi.mocked(getOnboardingStatus).mockResolvedValue({
       status: "running",
       progressPercent: 90,

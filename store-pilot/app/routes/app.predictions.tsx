@@ -1,12 +1,12 @@
 import type { HeadersFunction } from "react-router";
-import { useLoaderData, useRouteError } from "react-router";
+import { useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import {
   createFeatureGatedWorkspaceLoader,
   getPredictionsWorkspaceData,
 } from "../services/intelligence-workspace.server";
-import { renderIntelligenceWorkspace } from "../services/intelligence-workspace-views";
+import { IntelligenceWorkspaceRoute } from "../components/intelligence/IntelligenceWorkspaceRoute";
 
 export const loader = createFeatureGatedWorkspaceLoader({
   feature: "prediction_workspace",
@@ -14,8 +14,7 @@ export const loader = createFeatureGatedWorkspaceLoader({
 });
 
 export default function PredictionsWorkspaceRoute() {
-  const data = useLoaderData<typeof loader>();
-  return renderIntelligenceWorkspace(data);
+  return <IntelligenceWorkspaceRoute />;
 }
 
 export function ErrorBoundary() {
