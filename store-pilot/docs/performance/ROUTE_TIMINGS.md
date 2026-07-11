@@ -55,9 +55,25 @@ findstr "workspaceCore globalSearch unifiedTimeline"
 
 ---
 
-## Production capture
+## Production capture (post-deploy `6b6b154`)
 
-⏳ **NOT VERIFIED** — requires authenticated merchant navigation post-deploy.
+| Probe | Result |
+|-------|--------|
+| Unauthenticated `GET /app` | `authenticateAndResolveStore` **1ms** (auth redirect) |
+| Unauthenticated `GET /app/inventory` | Auth redirect; no `workspaceCore` logged |
+| Health endpoints | All 200 |
+
+⏳ **Authenticated timings NOT VERIFIED** — requires embedded Shopify Admin MV-1 session.
+
+### Unauthenticated Lighthouse `/app` (redirect page)
+
+| Metric | P1 | P2 |
+|--------|----|----|
+| Score | 0.88 | 0.92 |
+| FCP | 2840 ms | 2674 ms |
+| LCP | 2873 ms | 2686 ms |
+| TBT | 80 ms | 51 ms |
+| TTI | 3255 ms | 2825 ms |
 
 Prior P1 unauthenticated probes: `authenticateAndResolveStore` **1–3ms** (auth redirect only).
 
