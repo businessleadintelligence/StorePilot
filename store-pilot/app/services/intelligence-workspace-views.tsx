@@ -37,6 +37,21 @@ function relatedLinksPanel() {
   return <CrossLinks links={defaultRelatedLinks()} />;
 }
 
+type ResolvedWorkspaceLoaderData = ReturnType<typeof normalizeWorkspaceLoaderData>;
+
+function normalizeWorkspaceLoaderData(
+  data: IntelligenceWorkspaceLoaderData,
+): IntelligenceWorkspaceLoaderData & {
+  searchResults: import("../intelligence-ui/types").SearchResultView[];
+  timeline: import("../intelligence-ui/types").TimelineEventView[];
+} {
+  return {
+    ...data,
+    searchResults: Array.isArray(data.searchResults) ? data.searchResults : [],
+    timeline: Array.isArray(data.timeline) ? data.timeline : [],
+  };
+}
+
 export function renderIntelligenceWorkspace(data: IntelligenceWorkspaceLoaderData | null) {
   if (!data) {
     return (
@@ -66,11 +81,13 @@ export function renderIntelligenceWorkspace(data: IntelligenceWorkspaceLoaderDat
     );
   }
 
-  const pageData = mapWorkspacePayload(data);
+  const pageData = mapWorkspacePayload(normalizeWorkspaceLoaderData(data));
   return <WorkspaceLayout data={pageData} />;
 }
 
-function mapWorkspacePayload(data: IntelligenceWorkspaceLoaderData): WorkspacePageData {
+function mapWorkspacePayload(
+  data: ResolvedWorkspaceLoaderData,
+): WorkspacePageData {
   const { workspace, searchResults, timeline, currency } = data;
   if (!workspace) {
     throw new Error("workspace payload required");
@@ -331,7 +348,12 @@ function mapWorkspacePayload(data: IntelligenceWorkspaceLoaderData): WorkspacePa
         actions: [],
         summary: (
           <s-stack gap="base">
-            <s-text color="subdued">{workspace.products.length} active products</s-text>
+            <s-text color="subdued">
+              {workspace.total ?? workspace.products.length} active products
+              {workspace.page && workspace.pageSize
+                ? ` · page ${workspace.page} (${workspace.pageSize} per page)`
+                : ""}
+            </s-text>
             {workspace.products.slice(0, 10).map((product) => (
               <s-link key={product.id} href={WORKSPACE_ROUTES.productDetail(product.id)}>
                 {product.title}
@@ -466,8 +488,8 @@ function mapWorkspacePayload(data: IntelligenceWorkspaceLoaderData): WorkspacePa
 
 function mapDomainWorkspace(
   workspace: Extract<IntelligenceWorkspacePayload, { kind: "domain" }>,
-  searchResults: IntelligenceWorkspaceLoaderData["searchResults"],
-  timeline: IntelligenceWorkspaceLoaderData["timeline"],
+  searchResults: ResolvedWorkspaceLoaderData["searchResults"],
+  timeline: ResolvedWorkspaceLoaderData["timeline"],
   currency: string,
 ): WorkspacePageData {
   const title =
@@ -562,8 +584,8 @@ function mapDomainWorkspace(
 
 function mapMerchantWorkspace(
   workspace: Extract<IntelligenceWorkspacePayload, { kind: "merchant-intelligence" }>,
-  searchResults: IntelligenceWorkspaceLoaderData["searchResults"],
-  timeline: IntelligenceWorkspaceLoaderData["timeline"],
+  searchResults: ResolvedWorkspaceLoaderData["searchResults"],
+  timeline: ResolvedWorkspaceLoaderData["timeline"],
   currency: string,
 ): WorkspacePageData {
   const characteristics =
@@ -618,8 +640,8 @@ function mapMerchantWorkspace(
 
 function mapBusinessMemoryWorkspace(
   workspace: Extract<IntelligenceWorkspacePayload, { kind: "business-memory" }>,
-  searchResults: IntelligenceWorkspaceLoaderData["searchResults"],
-  timeline: IntelligenceWorkspaceLoaderData["timeline"],
+  searchResults: ResolvedWorkspaceLoaderData["searchResults"],
+  timeline: ResolvedWorkspaceLoaderData["timeline"],
   currency: string,
 ): WorkspacePageData {
   return {

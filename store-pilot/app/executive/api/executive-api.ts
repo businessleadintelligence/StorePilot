@@ -6,17 +6,19 @@ import type {
   ExecutiveBriefingPayload,
 } from "../shared/types";
 
-export async function getExecutiveDecisions(storeId: string) {
+export async function getExecutiveDecisions(storeId: string, take = 50) {
   return prisma.executiveDecision.findMany({
     where: { storeId, active: true },
     orderBy: [{ rankScore: "desc" }, { urgency: "desc" }],
+    take,
   });
 }
 
-export async function getOperationsQueue(storeId: string) {
+export async function getOperationsQueue(storeId: string, take = 30) {
   return prisma.decisionTask.findMany({
     where: { storeId },
     orderBy: [{ createdAt: "desc" }],
+    take,
     include: { decision: true },
   });
 }
@@ -68,6 +70,12 @@ export async function getDailyOperatingPlan(
 
 export async function getDecisionCards(storeId: string): Promise<DecisionCardPayload[]> {
   const decisions = await getExecutiveDecisions(storeId);
+  return mapDecisionsToCards(decisions);
+}
+
+export function mapDecisionsToCards(
+  decisions: Awaited<ReturnType<typeof getExecutiveDecisions>>,
+): DecisionCardPayload[] {
   return decisions.slice(0, 12).map((decision) => ({
     decisionId: decision.id,
     title: decision.title,

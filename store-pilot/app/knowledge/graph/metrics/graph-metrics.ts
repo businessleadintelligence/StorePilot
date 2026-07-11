@@ -133,3 +133,34 @@ function round(value: number, digits = 4): number {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
+
+const GRAPH_STATS_TTL_MS = 5 * 60_000;
+
+export async function getGraphStatisticsForLoader(
+  storeId: string,
+): Promise<GraphStatisticsSnapshot> {
+  const persisted = await prisma.knowledgeGraphStatistics.findUnique({
+    where: { storeId },
+  });
+
+  if (
+    persisted &&
+    Date.now() - persisted.lastComputedAt.getTime() <= GRAPH_STATS_TTL_MS
+  ) {
+    return {
+      totalNodes: persisted.totalNodes,
+      totalEdges: persisted.totalEdges,
+      averageDegree: Number(persisted.averageDegree),
+      connectedComponents: persisted.connectedComponents,
+      disconnectedNodes: persisted.disconnectedNodes,
+      graphDensity: Number(persisted.graphDensity),
+      evidenceCoverage: Number(persisted.evidenceCoverage),
+      businessCoverage: Number(persisted.businessCoverage),
+      relationshipCoverage: Number(persisted.relationshipCoverage),
+    };
+  }
+
+  const live = await computeGraphStatistics(storeId);
+  void persistGraphStatistics(storeId, live).catch(() => undefined);
+  return live;
+}

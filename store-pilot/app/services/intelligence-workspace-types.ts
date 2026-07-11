@@ -125,6 +125,9 @@ export type KnowledgeGraphWorkspaceData = {
 
 export type ProductsWorkspaceData = {
   kind: "products";
+  page?: number;
+  pageSize?: number;
+  total?: number;
   products: Array<{
     id: string;
     title: string;
@@ -177,8 +180,8 @@ export type IntelligenceWorkspacePayload =
 /** Serializable loader payload for intelligence workspace routes. */
 export type IntelligenceWorkspaceLoaderData = {
   workspace: IntelligenceWorkspacePayload | null;
-  searchResults: SearchResultView[];
-  timeline: TimelineEventView[];
+  searchResults: SearchResultView[] | Promise<SearchResultView[] | null>;
+  timeline: TimelineEventView[] | Promise<TimelineEventView[] | null>;
   currency: string;
   featureGate?: FeatureGateViewModel | null;
   /** Document SSR returns shell only; client revalidates via `.data`. */

@@ -74,6 +74,12 @@ export const getTrafficExplanation = (storeId: string) =>
 
 export async function getRootCauseUiItems(storeId: string): Promise<RootCauseUiItem[]> {
   const causes = await getRootCauses(storeId);
+  return mapRootCauseUiItemsFromRows(causes);
+}
+
+export function mapRootCauseUiItemsFromRows(
+  causes: Awaited<ReturnType<typeof getRootCauses>>,
+): RootCauseUiItem[] {
   return causes.slice(0, 8).map((cause) => ({
     id: cause.id,
     businessOutcome: cause.businessOutcome,

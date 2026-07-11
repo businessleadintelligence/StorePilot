@@ -35,14 +35,23 @@ import {
   getOnboardingReminders,
   serializeMerchantOnboardingRemindersForLoader,
 } from "../onboarding/onboarding-service";
+import {
+  getRequestLogContext,
+  timeLoaderSection,
+} from "../lib/route-loader-log.server";
+import { resolveRequestStoreContext } from "../lib/request-auth.server";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const shop = session.shop;
+  const { route, requestId } = getRequestLogContext(request);
+  const storeContext = await timeLoaderSection(
+    "authenticateAndResolveStore",
+    { route, requestId, category: "auth" },
+    () => resolveRequestStoreContext(request),
+  );
 
-  if (!shop) {
+  if (!storeContext) {
     return {
       googleIntegration: null,
       clarityIntegration: null,
@@ -57,46 +66,38 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     };
   }
 
-  const store = await prisma.store.findUnique({
-    where: { shopifyDomain: shop },
-    select: { id: true },
-  });
-
-  if (!store) {
-    return {
-      googleIntegration: null,
-      clarityIntegration: null,
-      selectableProperties: [],
-      selectableSearchConsoleSites: [],
-      googleSetup: null,
-      googleError: null,
-      claritySetup: null,
-      productionHealthBadge: { label: "Healthy", tone: "success" as const },
-    };
-  }
+  const storeId = storeContext.storeId;
+  const logContext = {
+    route,
+    requestId,
+    storeId,
+    shop: storeContext.shop,
+  };
 
   const url = new URL(request.url);
   const googleSetup = url.searchParams.get("googleSetup");
   const googleError = url.searchParams.get("googleError");
   const claritySetup = url.searchParams.get("claritySetup");
   const [googleIntegration, clarityIntegration, productionHealthBadge, onboardingReminders, billingSummary] =
-    await Promise.all([
-      getGoogleIntegrationPublicView(store.id),
-      getClarityIntegrationPublicView(store.id),
-      getProductionHealthBadge(store.id),
-      getOnboardingReminders(store.id),
-      getBillingDashboard(store.id).then(serializeBillingDashboardForRoute),
-    ]);
+    await timeLoaderSection("settingsParallelFetch", { ...logContext, category: "database" }, () =>
+      Promise.all([
+        getGoogleIntegrationPublicView(storeId),
+        getClarityIntegrationPublicView(storeId),
+        getProductionHealthBadge(storeId),
+        getOnboardingReminders(storeId),
+        getBillingDashboard(storeId).then(serializeBillingDashboardForRoute),
+      ]),
+    );
   const selectableProperties =
     googleSetup === "select-property" && googleIntegration.needsPropertySelection
-      ? await listSelectableGoogleAnalyticsProperties(store.id)
+      ? await listSelectableGoogleAnalyticsProperties(storeId)
       : [];
 
   const selectableSearchConsoleSites =
     googleIntegration.connected &&
     (googleSetup === "select-search-console" || googleIntegration.needsSearchConsolePropertySelection) &&
     !googleIntegration.searchConsoleSiteUrl
-      ? await listSelectableSearchConsoleSites(store.id)
+      ? await listSelectableSearchConsoleSites(storeId)
       : [];
 
   return {

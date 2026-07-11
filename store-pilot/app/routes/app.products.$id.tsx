@@ -3,27 +3,26 @@ import { useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { IntelligenceWorkspaceRoute } from "../components/intelligence/IntelligenceWorkspaceRoute";
-import { isReactRouterDataRequest } from "../lib/react-router-request.server";
 import {
+  createIntelligenceWorkspaceLoader,
   getProductDetailWorkspaceData,
-  resolveStoreContext,
 } from "../services/intelligence-workspace.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const ctx = await resolveStoreContext(request);
-  if (!ctx || !params.id) {
-    return { workspace: null, searchResults: [], timeline: [], currency: "USD" };
-  }
-  if (!isReactRouterDataRequest(request)) {
+export const loader = async (args: LoaderFunctionArgs) => {
+  const productId = args.params.id;
+  if (!productId) {
     return {
       workspace: null,
       searchResults: [],
       timeline: [],
-      currency: ctx.currency,
-      deferWorkspaceLoad: true,
+      currency: "USD",
     };
   }
-  return getProductDetailWorkspaceData(ctx, params.id);
+
+  const innerLoader = createIntelligenceWorkspaceLoader((ctx, request) =>
+    getProductDetailWorkspaceData(ctx, productId, request),
+  );
+  return innerLoader(args);
 };
 
 export default function ProductDetailWorkspaceRoute() {

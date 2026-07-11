@@ -4,21 +4,26 @@ import prisma from "../db.server";
 import { resolveRequestStoreContext } from "../lib/request-auth.server";
 import { isReactRouterDataRequest } from "../lib/react-router-request.server";
 import {
+  deferIntelligenceSection,
+  getRequestLogContext,
+  timeLoaderSection,
+} from "../lib/route-loader-log.server";
+import {
   getExecutiveDecisions,
   getOperationsQueue,
 } from "../executive/api/executive-api";
 import { getExperimentRecommendations, getExperimentUiItems } from "../experiments/api/experiment-api";
 import {
-  getBusinessStability,
-  getPredictionUiItems,
-  getPredictions,
-} from "../prediction/api/prediction-api";
-import {
   getBusinessTimeline,
   getRootCauseTimeline,
-  getRootCauseUiItems,
   getRootCauses,
+  mapRootCauseUiItemsFromRows,
 } from "../root-cause/api/root-cause-api";
+import {
+  getBusinessStability,
+  getPredictions,
+  mapPredictionUiItemsFromRows,
+} from "../prediction/api/prediction-api";
 import {
   getConfidenceEvolution,
   getDecisionJournal,
@@ -34,6 +39,7 @@ import {
   getPatternSeeds,
 } from "../learning/historical/api/historical-api";
 import { createKnowledgeGraphApi } from "../knowledge/graph/api/graph-api";
+import { getGraphStatisticsForLoader } from "../knowledge/graph/metrics/graph-metrics";
 import { getExecutiveDashboardForUi } from "./executive-ui.server";
 import { getMerchantIntelligenceDashboardForUi } from "./merchant-intelligence-ui.server";
 import { WORKSPACE_ROUTES } from "../intelligence-ui/constants";
@@ -78,6 +84,50 @@ const EMPTY_WORKSPACE_LOADER: IntelligenceWorkspaceLoaderData = {
   timeline: [],
   currency: "USD",
 };
+
+type WorkspaceCoreData = Pick<
+  IntelligenceWorkspaceLoaderData,
+  "workspace" | "currency" | "featureGate"
+>;
+
+function resolveProductPagination(request: Request) {
+  const url = new URL(request.url);
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1) || 1);
+  const pageSize = Math.min(
+    50,
+    Math.max(20, Number(url.searchParams.get("pageSize") || 25) || 25),
+  );
+  return { page, pageSize, skip: (page - 1) * pageSize };
+}
+
+function buildLoaderLogContext(
+  request: Request,
+  ctx: StoreContext,
+): {
+  shop: string | null;
+  storeId: string;
+  route: string;
+  requestId: string | null;
+} {
+  const { route, requestId } = getRequestLogContext(request);
+  return { route, requestId, storeId: ctx.storeId, shop: null };
+}
+
+function attachDeferredWorkspaceShell(
+  ctx: StoreContext,
+  core: WorkspaceCoreData,
+  logContext: ReturnType<typeof buildLoaderLogContext>,
+): IntelligenceWorkspaceLoaderData {
+  return {
+    ...core,
+    searchResults: deferIntelligenceSection("globalSearch", logContext, () =>
+      buildGlobalSearch(ctx.storeId),
+    ) as unknown as SearchResultView[],
+    timeline: deferIntelligenceSection("unifiedTimeline", logContext, () =>
+      buildUnifiedTimeline(ctx.storeId),
+    ) as unknown as TimelineEventView[],
+  };
+}
 
 function workspaceShellOnly(currency: string): IntelligenceWorkspaceLoaderData & {
   deferWorkspaceLoad: true;
@@ -207,19 +257,13 @@ export async function buildGraphNodes(storeId: string, limit = 30): Promise<Rela
   }));
 }
 
-async function loadWorkspaceShell(ctx: StoreContext) {
-  const [searchResults, timeline] = await Promise.all([
-    buildGlobalSearch(ctx.storeId),
-    buildUnifiedTimeline(ctx.storeId),
-  ]);
-  return { searchResults, timeline, currency: ctx.currency };
-}
-
-export async function getExecutiveWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, executive, decisions, queue, stability, merchant, memory] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    getExecutiveDashboardForUi(ctx.storeId, ctx.currency),
-    getExecutiveDecisions(ctx.storeId),
+export async function getExecutiveWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const decisions = await getExecutiveDecisions(ctx.storeId);
+  const [executive, queue, stability, merchant, memory] = await Promise.all([
+    getExecutiveDashboardForUi(ctx.storeId, ctx.currency, { prefetchedDecisions: decisions }),
     getOperationsQueue(ctx.storeId),
     getBusinessStability(ctx.storeId),
     getMerchantIntelligenceDashboardForUi(ctx.storeId),
@@ -227,7 +271,7 @@ export async function getExecutiveWorkspaceData(ctx: StoreContext): Promise<Inte
   ]);
 
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "executive",
       executive,
@@ -243,7 +287,8 @@ export async function getExecutiveWorkspaceData(ctx: StoreContext): Promise<Inte
 export async function getDomainWorkspaceData(
   ctx: StoreContext,
   domain: "inventory" | "pricing" | "seo",
-): Promise<IntelligenceWorkspaceLoaderData> {
+  _request: Request,
+): Promise<WorkspaceCoreData> {
   const predictionFilter =
     domain === "inventory"
       ? ["inventory_stockout", "operational_supplier_delay"]
@@ -259,29 +304,28 @@ export async function getDomainWorkspaceData(
         ? ["revenue_decrease"]
         : ["traffic_loss"];
 
-  const [shell, predictions, rootCauses, experiments, graphNodes, patterns] = await Promise.all([
-    loadWorkspaceShell(ctx),
+  const [predictions, rootCauses, experiments, graphNodes, patterns] = await Promise.all([
     prisma.prediction.findMany({
       where: { storeId: ctx.storeId, active: true, predictionType: { in: predictionFilter as never[] } },
       orderBy: { rankScore: "desc" },
-      take: 10,
+      take: 20,
     }),
     prisma.rootCause.findMany({
       where: { storeId: ctx.storeId, active: true, businessOutcome: { in: outcomeFilter as never[] } },
       orderBy: { rankScore: "desc" },
-      take: 10,
+      take: 20,
     }),
     prisma.experiment.findMany({
       where: { storeId: ctx.storeId, experimentDomain: experimentDomain as never },
       orderBy: { rankScore: "desc" },
-      take: 10,
+      take: 20,
     }),
     buildGraphNodes(ctx.storeId, 20),
     getPatternSeeds(ctx.storeId),
   ]);
 
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "domain",
       domain,
@@ -323,14 +367,16 @@ export async function getDomainWorkspaceData(
   };
 }
 
-export async function getRootCausesWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, items, causes, timelineRaw, graphNodes] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    getRootCauseUiItems(ctx.storeId),
+export async function getRootCausesWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [causes, timelineRaw, graphNodes] = await Promise.all([
     getRootCauses(ctx.storeId),
     getBusinessTimeline(ctx.storeId),
-    buildGraphNodes(ctx.storeId),
+    buildGraphNodes(ctx.storeId, 30),
   ]);
+  const items = mapRootCauseUiItemsFromRows(causes);
 
   const timeline: TimelineEventView[] = timelineRaw.events.map((event) => ({
     id: event.eventId,
@@ -341,21 +387,22 @@ export async function getRootCausesWorkspaceData(ctx: StoreContext): Promise<Int
   }));
 
   return {
-    ...shell,
-    timeline: timeline.length > 0 ? timeline : shell.timeline,
+    currency: ctx.currency,
     workspace: { kind: "root-causes", items, causes, timeline, graphNodes },
   };
 }
 
-export async function getPredictionsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, items, predictions, stability] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    getPredictionUiItems(ctx.storeId),
+export async function getPredictionsWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [predictions, stability] = await Promise.all([
     getPredictions(ctx.storeId),
     getBusinessStability(ctx.storeId),
   ]);
+  const items = mapPredictionUiItemsFromRows(predictions);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "predictions",
       items,
@@ -365,23 +412,25 @@ export async function getPredictionsWorkspaceData(ctx: StoreContext): Promise<In
   };
 }
 
-export async function getExperimentsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, items, recommendations] = await Promise.all([
-    loadWorkspaceShell(ctx),
+export async function getExperimentsWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [items, recommendations] = await Promise.all([
     getExperimentUiItems(ctx.storeId),
     getExperimentRecommendations(ctx.storeId),
   ]);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: { kind: "experiments", items, recommendationCount: recommendations.length },
   };
 }
 
 export async function getMerchantIntelligenceWorkspaceData(
   ctx: StoreContext,
-): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, dashboard, profile, dna, journal, confidence] = await Promise.all([
-    loadWorkspaceShell(ctx),
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [dashboard, profile, dna, journal, confidence] = await Promise.all([
     getMerchantIntelligenceDashboardForUi(ctx.storeId),
     getMerchantProfile(ctx.storeId),
     getLatestBusinessDna(ctx.storeId),
@@ -389,16 +438,16 @@ export async function getMerchantIntelligenceWorkspaceData(
     getConfidenceEvolution(ctx.storeId),
   ]);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: { kind: "merchant-intelligence", dashboard, profile, dna, journal, confidence },
   };
 }
 
 export async function getBusinessMemoryWorkspaceData(
   ctx: StoreContext,
-): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, memory, snapshots, patterns, confidence, dnaVersions] = await Promise.all([
-    loadWorkspaceShell(ctx),
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [memory, snapshots, patterns, confidence, dnaVersions] = await Promise.all([
     getHistoricalMemory(ctx.storeId),
     getHistoricalSnapshots(ctx.storeId),
     getPatternSeeds(ctx.storeId),
@@ -406,7 +455,7 @@ export async function getBusinessMemoryWorkspaceData(
     getBusinessDnaVersions(ctx.storeId),
   ]);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "business-memory",
       memoryUpdated: memory?.updatedAt?.toISOString() ?? null,
@@ -420,15 +469,14 @@ export async function getBusinessMemoryWorkspaceData(
 
 export async function getKnowledgeGraphWorkspaceData(
   ctx: StoreContext,
-): Promise<IntelligenceWorkspaceLoaderData> {
-  const api = createKnowledgeGraphApi();
-  const [shell, stats, nodes] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    api.getStatistics(ctx.storeId),
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const [stats, nodes] = await Promise.all([
+    getGraphStatisticsForLoader(ctx.storeId),
     buildGraphNodes(ctx.storeId, 50),
   ]);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "knowledge-graph",
       totalNodes: stats.totalNodes,
@@ -438,19 +486,35 @@ export async function getKnowledgeGraphWorkspaceData(
   };
 }
 
-export async function getProductsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, products] = await Promise.all([
-    loadWorkspaceShell(ctx),
+export async function getProductsWorkspaceData(
+  ctx: StoreContext,
+  request: Request,
+): Promise<WorkspaceCoreData> {
+  const { page, pageSize, skip } = resolveProductPagination(request);
+  const where = { storeId: ctx.storeId, status: "active" as const };
+  const [products, total] = await Promise.all([
     prisma.product.findMany({
-      where: { storeId: ctx.storeId, status: "active" },
+      where,
       orderBy: { updatedAt: "desc" },
-      take: 50,
+      take: pageSize,
+      skip,
+      select: {
+        id: true,
+        title: true,
+        sku: true,
+        inventoryQuantity: true,
+        price: true,
+      },
     }),
+    prisma.product.count({ where }),
   ]);
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "products",
+      page,
+      pageSize,
+      total,
       products: products.map((p) => ({
         id: p.id,
         title: p.title,
@@ -465,22 +529,20 @@ export async function getProductsWorkspaceData(ctx: StoreContext): Promise<Intel
 export async function getProductDetailWorkspaceData(
   ctx: StoreContext,
   productId: string,
-): Promise<IntelligenceWorkspaceLoaderData> {
+  _request: Request,
+): Promise<WorkspaceCoreData> {
   const product = await prisma.product.findFirst({
     where: { id: productId, storeId: ctx.storeId },
   });
   if (!product) {
     return {
-      searchResults: [],
-      timeline: [],
       currency: ctx.currency,
       workspace: null,
     };
   }
 
   const api = createKnowledgeGraphApi();
-  const [shell, graph, predictions, experiments] = await Promise.all([
-    loadWorkspaceShell(ctx),
+  const [graph, predictions, experiments] = await Promise.all([
     api.getProductGraph(ctx.storeId, product.shopifyProductId).catch(() => null),
     prisma.prediction.findMany({
       where: { storeId: ctx.storeId, active: true },
@@ -509,7 +571,7 @@ export async function getProductDetailWorkspaceData(
       : [];
 
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "product-detail",
       product: {
@@ -527,17 +589,17 @@ export async function getProductDetailWorkspaceData(
   };
 }
 
-export async function getCollectionsWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, collections] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    prisma.knowledgeGraphNode.findMany({
-      where: { storeId: ctx.storeId, nodeType: "Collection" },
-      orderBy: { updatedAt: "desc" },
-      take: 30,
-    }),
-  ]);
+export async function getCollectionsWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const collections = await prisma.knowledgeGraphNode.findMany({
+    where: { storeId: ctx.storeId, nodeType: "Collection" },
+    orderBy: { updatedAt: "desc" },
+    take: 30,
+  });
   return {
-    ...shell,
+    currency: ctx.currency,
     workspace: {
       kind: "collections",
       collections: collections.map((c) => ({
@@ -549,44 +611,70 @@ export async function getCollectionsWorkspaceData(ctx: StoreContext): Promise<In
   };
 }
 
-export async function getTimelineWorkspaceData(ctx: StoreContext): Promise<IntelligenceWorkspaceLoaderData> {
-  const [shell, journal] = await Promise.all([
-    loadWorkspaceShell(ctx),
-    getDecisionJournal(ctx.storeId, 20),
-  ]);
+export async function getTimelineWorkspaceData(
+  ctx: StoreContext,
+  _request: Request,
+): Promise<WorkspaceCoreData> {
+  const journal = await getDecisionJournal(ctx.storeId, 20);
   return {
-    ...shell,
-    workspace: { kind: "timeline", timeline: shell.timeline, journalCount: journal.length },
+    currency: ctx.currency,
+    workspace: { kind: "timeline", timeline: [], journalCount: journal.length },
   };
 }
 
+async function runTimedWorkspaceLoader(
+  request: Request,
+  builder: (ctx: StoreContext, request: Request) => Promise<WorkspaceCoreData>,
+): Promise<IntelligenceWorkspaceLoaderData | typeof EMPTY_WORKSPACE_LOADER> {
+  const { route, requestId } = getRequestLogContext(request);
+  const ctx = await timeLoaderSection(
+    "authenticateAndResolveStore",
+    { route, requestId, category: "auth" },
+    () => resolveStoreContext(request),
+  );
+  if (!ctx) {
+    return EMPTY_WORKSPACE_LOADER;
+  }
+
+  const logContext = buildLoaderLogContext(request, ctx);
+
+  if (!isReactRouterDataRequest(request)) {
+    return workspaceShellOnly(ctx.currency);
+  }
+
+  const core = await timeLoaderSection("workspaceCore", {
+    ...logContext,
+    category: "database",
+  }, () => builder(ctx, request));
+
+  return attachDeferredWorkspaceShell(ctx, core, logContext);
+}
+
 export function createIntelligenceWorkspaceLoader(
-  builder: (ctx: StoreContext) => Promise<IntelligenceWorkspaceLoaderData>,
+  builder: (ctx: StoreContext, request: Request) => Promise<WorkspaceCoreData>,
 ) {
-  return async ({ request }: LoaderFunctionArgs) => {
-    const ctx = await resolveStoreContext(request);
-    if (!ctx) {
-      return EMPTY_WORKSPACE_LOADER;
-    }
-    if (!isReactRouterDataRequest(request)) {
-      return workspaceShellOnly(ctx.currency);
-    }
-    return builder(ctx);
-  };
+  return async ({ request }: LoaderFunctionArgs) => runTimedWorkspaceLoader(request, builder);
 }
 
 export function createFeatureGatedWorkspaceLoader(input: {
   feature: import("../billing/plan-registry").FeatureKey;
-  builder: (ctx: StoreContext) => Promise<IntelligenceWorkspaceLoaderData>;
+  builder: (ctx: StoreContext, request: Request) => Promise<WorkspaceCoreData>;
 }) {
   return async ({ request }: LoaderFunctionArgs) => {
-    const ctx = await resolveStoreContext(request);
+    const { route, requestId } = getRequestLogContext(request);
+    const ctx = await timeLoaderSection(
+      "authenticateAndResolveStore",
+      { route, requestId, category: "auth" },
+      () => resolveStoreContext(request),
+    );
     if (!ctx) {
       return {
         ...EMPTY_WORKSPACE_LOADER,
         featureGate: null,
       };
     }
+
+    const logContext = buildLoaderLogContext(request, ctx);
 
     if (!isReactRouterDataRequest(request)) {
       return {
@@ -599,7 +687,10 @@ export function createFeatureGatedWorkspaceLoader(input: {
     const { toFeatureGateViewModel, serializeFeatureGateViewModel } = await import(
       "../billing/feature-gate-view"
     );
-    const availability = await getStoreFeatureAvailability(ctx.storeId, input.feature);
+
+    const availability = await timeLoaderSection("featureGate", { ...logContext, category: "billing" }, () =>
+      getStoreFeatureAvailability(ctx.storeId, input.feature),
+    );
     const featureGate = serializeFeatureGateViewModel(toFeatureGateViewModel(availability));
 
     if (!availability.available) {
@@ -612,7 +703,10 @@ export function createFeatureGatedWorkspaceLoader(input: {
       };
     }
 
-    const loaded = await input.builder(ctx);
-    return { ...loaded, featureGate };
+    const core = await timeLoaderSection("workspaceCore", { ...logContext, category: "database" }, () =>
+      input.builder(ctx, request),
+    );
+
+    return { ...attachDeferredWorkspaceShell(ctx, core, logContext), featureGate };
   };
 }

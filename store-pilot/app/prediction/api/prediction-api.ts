@@ -37,6 +37,12 @@ export async function getForecastSnapshot(storeId: string) {
 
 export async function getPredictionUiItems(storeId: string): Promise<PredictionUiItem[]> {
   const predictions = await getPredictions(storeId);
+  return mapPredictionUiItemsFromRows(predictions);
+}
+
+export function mapPredictionUiItemsFromRows(
+  predictions: Awaited<ReturnType<typeof getPredictions>>,
+): PredictionUiItem[] {
   return predictions.slice(0, 8).map((prediction) => ({
     predictionId: prediction.id,
     predictionType: prediction.predictionType,

@@ -193,7 +193,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const logContext = { route, requestId, shop: null as string | null, storeId: undefined as string | undefined };
 
-    const storeContext = await timeLoaderSection("authenticateAndResolveStore", logContext, () =>
+    const storeContext = await timeLoaderSection("authenticateAndResolveStore", {
+      ...logContext,
+      category: "auth",
+    }, () =>
       resolveRequestStoreContext(request),
     );
 
@@ -207,7 +210,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     const [onboarding, syncStatus, metrics] = await timeLoaderSection(
       "dashboardShellParallel",
-      logContext,
+      { ...logContext, category: "database" },
       () =>
         Promise.all([
           getOnboardingStatus(storeId),

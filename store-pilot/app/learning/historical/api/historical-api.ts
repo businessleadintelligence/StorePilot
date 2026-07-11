@@ -12,10 +12,11 @@ export async function getHistoricalSnapshots(storeId: string, take = 10) {
   });
 }
 
-export async function getPatternSeeds(storeId: string, activeOnly = true) {
+export async function getPatternSeeds(storeId: string, activeOnly = true, take = 25) {
   return prisma.patternSeed.findMany({
     where: { storeId, active: activeOnly ? true : undefined },
     orderBy: { confidence: "desc" },
+    take,
   });
 }
 

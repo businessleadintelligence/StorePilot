@@ -8,8 +8,8 @@ import {
 } from "../services/intelligence-workspace.server";
 import { IntelligenceWorkspaceRoute } from "../components/intelligence/IntelligenceWorkspaceRoute";
 
-export const loader = createIntelligenceWorkspaceLoader((ctx) =>
-  getDomainWorkspaceData(ctx, "inventory"),
+export const loader = createIntelligenceWorkspaceLoader((ctx, request) =>
+  getDomainWorkspaceData(ctx, "inventory", request),
 );
 
 export default function WorkspaceRoute() {

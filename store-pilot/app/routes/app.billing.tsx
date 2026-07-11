@@ -8,20 +8,36 @@ import {
   handleBillingAction,
   serializeBillingDashboardForRoute,
 } from "../billing/billing-service";
+import { resolveRequestStoreContext, authenticateAdminOnce } from "../lib/request-auth.server";
 import {
-  authenticateAdminOnce,
-  resolveRequestStoreContext,
-} from "../lib/request-auth.server";
+  getRequestLogContext,
+  timeLoaderSection,
+} from "../lib/route-loader-log.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const storeContext = await resolveRequestStoreContext(request);
+  const { route, requestId } = getRequestLogContext(request);
+  const storeContext = await timeLoaderSection(
+    "authenticateAndResolveStore",
+    { route, requestId, category: "auth" },
+    () => resolveRequestStoreContext(request),
+  );
 
   if (!storeContext) {
     return { billingDashboard: null };
   }
 
   const billingDashboard = serializeBillingDashboardForRoute(
-    await getBillingDashboard(storeContext.storeId),
+    await timeLoaderSection(
+      "billingDashboard",
+      {
+        route,
+        requestId,
+        storeId: storeContext.storeId,
+        shop: storeContext.shop,
+        category: "database",
+      },
+      () => getBillingDashboard(storeContext.storeId),
+    ),
   );
 
   return { billingDashboard };

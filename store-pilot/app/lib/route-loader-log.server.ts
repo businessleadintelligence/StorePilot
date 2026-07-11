@@ -62,6 +62,16 @@ export function deferIntelligenceSection<T>(
   });
 }
 
+export type LoaderTimingCategory =
+  | "auth"
+  | "store"
+  | "billing"
+  | "database"
+  | "api"
+  | "cache"
+  | "render"
+  | "total";
+
 export async function timeLoaderSection<T>(
   section: string,
   context: {
@@ -69,6 +79,7 @@ export async function timeLoaderSection<T>(
     shop?: string | null;
     storeId?: string;
     requestId?: string | null;
+    category?: LoaderTimingCategory;
   },
   load: () => Promise<T>,
 ): Promise<T> {
@@ -84,6 +95,7 @@ export async function timeLoaderSection<T>(
       requestId: context.requestId ?? null,
       operation: "loader_section_timing",
       reason: `${Date.now() - startedAt}ms`,
+      stack: context.category,
     });
   }
 }
