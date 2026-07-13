@@ -11,7 +11,7 @@ import { IntelligenceWorkspaceRoute } from "../components/intelligence/Intellige
 export const loader = createIntelligenceWorkspaceLoader(getTimelineWorkspaceData);
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Timeline" />;
 }
 
 export function ErrorBoundary() {

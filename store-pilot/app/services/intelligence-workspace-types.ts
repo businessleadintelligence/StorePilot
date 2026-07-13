@@ -179,11 +179,18 @@ export type IntelligenceWorkspacePayload =
 
 /** Serializable loader payload for intelligence workspace routes. */
 export type IntelligenceWorkspaceLoaderData = {
-  workspace: IntelligenceWorkspacePayload | null;
+  /**
+   * Workspace core may be a Promise on document SSR / streaming navigations so
+   * Phase 1 chrome (title + skeleton) paints before DB work finishes.
+   */
+  workspace:
+    | IntelligenceWorkspacePayload
+    | null
+    | Promise<IntelligenceWorkspacePayload | null>;
   searchResults: SearchResultView[] | Promise<SearchResultView[] | null>;
   timeline: TimelineEventView[] | Promise<TimelineEventView[] | null>;
   currency: string;
   featureGate?: FeatureGateViewModel | null;
-  /** Document SSR returns shell only; client revalidates via `.data`. */
+  /** @deprecated P2 empty-shell + client revalidate; replaced by streamed workspace. */
   deferWorkspaceLoad?: boolean;
 };

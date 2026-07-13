@@ -11,7 +11,7 @@ import { IntelligenceWorkspaceRoute } from "../components/intelligence/Intellige
 export const loader = createIntelligenceWorkspaceLoader(getBusinessMemoryWorkspaceData);
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Business Memory" />;
 }
 
 export function ErrorBoundary() {

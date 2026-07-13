@@ -11,7 +11,7 @@ import { IntelligenceWorkspaceRoute } from "../components/intelligence/Intellige
 export const loader = createIntelligenceWorkspaceLoader(getKnowledgeGraphWorkspaceData);
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Knowledge Graph" />;
 }
 
 export function ErrorBoundary() {

@@ -11,7 +11,7 @@ import {
 export const loader = createIntelligenceWorkspaceLoader(getExecutiveWorkspaceData);
 
 export default function ExecutiveIntelligenceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Executive Intelligence" />;
 }
 
 export function ErrorBoundary() {

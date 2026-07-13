@@ -11,7 +11,7 @@ import { IntelligenceWorkspaceRoute } from "../components/intelligence/Intellige
 export const loader = createIntelligenceWorkspaceLoader(getRootCausesWorkspaceData);
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Root Cause" />;
 }
 
 export function ErrorBoundary() {

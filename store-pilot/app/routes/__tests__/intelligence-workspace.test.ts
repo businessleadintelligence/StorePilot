@@ -104,4 +104,31 @@ describe("Executive intelligence workspace loader", () => {
     });
     expect(result.currency).toBe("USD");
   });
+
+  it("streams workspace on document SSR instead of empty shell revalidate", async () => {
+    vi.mocked(getExecutiveDashboardForUi).mockResolvedValue({
+      briefing: null,
+      operatingPlan: null,
+      decisionCards: [],
+      operationalReadinessScore: 80,
+      executiveCooReady: true,
+      currency: "USD",
+    });
+
+    const result = await loader({
+      request: new Request("http://localhost/app/executive"),
+      params: {},
+      context: {},
+      url: new URL("http://localhost/app/executive"),
+      pattern: "/app/executive",
+    } as never);
+
+    expect(result.deferWorkspaceLoad).toBeUndefined();
+    expect(result.workspace).toBeInstanceOf(Promise);
+    const workspace = await result.workspace;
+    expect(workspace).toMatchObject({
+      kind: "executive",
+      stabilityScore: 72,
+    });
+  });
 });

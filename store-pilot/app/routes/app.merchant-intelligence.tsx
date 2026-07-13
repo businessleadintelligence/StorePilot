@@ -14,7 +14,7 @@ export const loader = createFeatureGatedWorkspaceLoader({
 });
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Merchant Intelligence" />;
 }
 
 export function ErrorBoundary() {

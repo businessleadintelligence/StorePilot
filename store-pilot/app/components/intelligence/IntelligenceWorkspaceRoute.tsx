@@ -1,8 +1,11 @@
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
-import { useLoaderData, useRevalidator } from "react-router";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { Await, useLoaderData } from "react-router";
 
 import { DeferredSectionSkeleton } from "../dashboard/DeferredSectionSkeleton";
-import type { IntelligenceWorkspaceLoaderData } from "../../services/intelligence-workspace-types";
+import type {
+  IntelligenceWorkspaceLoaderData,
+  IntelligenceWorkspacePayload,
+} from "../../services/intelligence-workspace-types";
 import type {
   SearchResultView,
   TimelineEventView,
@@ -21,9 +24,7 @@ const LazyIntelligenceWorkspace = lazy(async () => {
   };
 });
 
-type WorkspaceLoaderData = IntelligenceWorkspaceLoaderData & {
-  deferWorkspaceLoad?: boolean;
-};
+type WorkspaceLoaderData = IntelligenceWorkspaceLoaderData;
 
 function isPromise<T>(value: unknown): value is Promise<T> {
   return (
@@ -78,42 +79,65 @@ function DeferredShellWorkspace({ data }: { data: WorkspaceLoaderData }) {
   );
 }
 
-export function IntelligenceWorkspaceRoute() {
-  const data = useLoaderData<WorkspaceLoaderData>();
-  const { state, revalidate } = useRevalidator();
-  const workspaceRevalidatedRef = useRef(false);
-
-  useEffect(() => {
-    if (
-      !data.deferWorkspaceLoad ||
-      workspaceRevalidatedRef.current ||
-      state !== "idle"
-    ) {
-      return;
-    }
-
-    workspaceRevalidatedRef.current = true;
-    revalidate();
-  }, [data.deferWorkspaceLoad, state, revalidate]);
-
-  if (data.deferWorkspaceLoad && !data.workspace) {
-    return (
-      <s-page heading="Loading workspace">
-        <DeferredSectionSkeleton />
-      </s-page>
-    );
-  }
-
+function ResolvedWorkspace({
+  data,
+  workspace,
+}: {
+  data: WorkspaceLoaderData;
+  workspace: IntelligenceWorkspacePayload | null;
+}) {
+  const resolved: WorkspaceLoaderData = { ...data, workspace };
   const hasDeferredShell =
     isPromise(data.searchResults) || isPromise(data.timeline);
 
   return (
     <Suspense fallback={<DeferredSectionSkeleton />}>
       {hasDeferredShell ? (
-        <DeferredShellWorkspace data={data} />
+        <DeferredShellWorkspace data={resolved} />
       ) : (
-        <LazyIntelligenceWorkspace data={data} />
+        <LazyIntelligenceWorkspace data={resolved} />
       )}
     </Suspense>
   );
+}
+
+/**
+ * Phase 1 paints title + skeleton immediately.
+ * Phase 2 streams workspace core via Await (no client revalidate round-trip).
+ * Phase 3/4: charts / search / timeline resolve in DeferredShellWorkspace.
+ */
+export function IntelligenceWorkspaceRoute({
+  title = "Intelligence Workspace",
+}: {
+  title?: string;
+}) {
+  const data = useLoaderData<WorkspaceLoaderData>();
+
+  if (data.featureGate && !data.featureGate.available) {
+    return (
+      <Suspense fallback={<DeferredSectionSkeleton />}>
+        <LazyIntelligenceWorkspace data={data} />
+      </Suspense>
+    );
+  }
+
+  if (isPromise(data.workspace)) {
+    return (
+      <Suspense
+        fallback={
+          <s-page heading={title}>
+            <DeferredSectionSkeleton title={`Loading ${title}…`} />
+          </s-page>
+        }
+      >
+        <Await resolve={data.workspace}>
+          {(workspace) => (
+            <ResolvedWorkspace data={data} workspace={workspace} />
+          )}
+        </Await>
+      </Suspense>
+    );
+  }
+
+  return <ResolvedWorkspace data={data} workspace={data.workspace} />;
 }

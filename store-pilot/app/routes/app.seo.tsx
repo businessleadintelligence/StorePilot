@@ -13,7 +13,7 @@ export const loader = createIntelligenceWorkspaceLoader((ctx, request) =>
 );
 
 export default function WorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="SEO Intelligence" />;
 }
 
 export function ErrorBoundary() {

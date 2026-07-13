@@ -26,7 +26,7 @@ export const loader = async (args: LoaderFunctionArgs) => {
 };
 
 export default function ProductDetailWorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Product Detail" />;
 }
 
 export function ErrorBoundary() {

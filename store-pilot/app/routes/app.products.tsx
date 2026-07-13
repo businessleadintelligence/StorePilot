@@ -11,7 +11,7 @@ import {
 export const loader = createIntelligenceWorkspaceLoader(getProductsWorkspaceData);
 
 export default function ProductsWorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Products" />;
 }
 
 export function ErrorBoundary() {

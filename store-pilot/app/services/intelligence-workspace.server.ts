@@ -129,15 +129,30 @@ function attachDeferredWorkspaceShell(
   };
 }
 
-function workspaceShellOnly(currency: string): IntelligenceWorkspaceLoaderData & {
-  deferWorkspaceLoad: true;
-} {
+function attachStreamingWorkspace(
+  ctx: StoreContext,
+  logContext: ReturnType<typeof buildLoaderLogContext>,
+  builder: (ctx: StoreContext, request: Request) => Promise<WorkspaceCoreData>,
+  request: Request,
+): IntelligenceWorkspaceLoaderData {
+  const workspace = deferIntelligenceSection("workspaceCore", logContext, async () => {
+    const core = await timeLoaderSection(
+      "workspaceCore",
+      { ...logContext, category: "database" },
+      () => builder(ctx, request),
+    );
+    return core.workspace;
+  });
+
   return {
-    workspace: null,
-    searchResults: [],
-    timeline: [],
-    currency,
-    deferWorkspaceLoad: true,
+    currency: ctx.currency,
+    workspace: workspace as IntelligenceWorkspaceLoaderData["workspace"],
+    searchResults: deferIntelligenceSection("globalSearch", logContext, () =>
+      buildGlobalSearch(ctx.storeId),
+    ) as unknown as SearchResultView[],
+    timeline: deferIntelligenceSection("unifiedTimeline", logContext, () =>
+      buildUnifiedTimeline(ctx.storeId),
+    ) as unknown as TimelineEventView[],
   };
 }
 
@@ -261,13 +276,21 @@ export async function getExecutiveWorkspaceData(
   ctx: StoreContext,
   _request: Request,
 ): Promise<WorkspaceCoreData> {
-  const decisions = await getExecutiveDecisions(ctx.storeId);
-  const [executive, queue, stability, merchant, memory] = await Promise.all([
-    getExecutiveDashboardForUi(ctx.storeId, ctx.currency, { prefetchedDecisions: decisions }),
+  // Critical path: decisions + executive UI + queue + stability (first paint cards).
+  // Merchant intelligence + historical memory are secondary (Phase 4) but still loaded
+  // in parallel so we do not add a sequential waterfalls after decisions.
+  const decisionsPromise = getExecutiveDecisions(ctx.storeId);
+  const [decisions, queue, stability, merchant, memory, executive] = await Promise.all([
+    decisionsPromise,
     getOperationsQueue(ctx.storeId),
     getBusinessStability(ctx.storeId),
     getMerchantIntelligenceDashboardForUi(ctx.storeId),
     getHistoricalMemory(ctx.storeId),
+    decisionsPromise.then((decisions) =>
+      getExecutiveDashboardForUi(ctx.storeId, ctx.currency, {
+        prefetchedDecisions: decisions,
+      }),
+    ),
   ]);
 
   return {
@@ -638,16 +661,19 @@ async function runTimedWorkspaceLoader(
 
   const logContext = buildLoaderLogContext(request, ctx);
 
-  if (!isReactRouterDataRequest(request)) {
-    return workspaceShellOnly(ctx.currency);
+  // Always stream workspace + shell. Do not empty-shell + client-revalidate:
+  // that pattern caused ~7–10s FCP/LCP on embedded Executive (field CWV).
+  // Auth still blocks TTFB; DB work streams into Suspense/Await boundaries.
+  if (isReactRouterDataRequest(request)) {
+    const core = await timeLoaderSection(
+      "workspaceCore",
+      { ...logContext, category: "database" },
+      () => builder(ctx, request),
+    );
+    return attachDeferredWorkspaceShell(ctx, core, logContext);
   }
 
-  const core = await timeLoaderSection("workspaceCore", {
-    ...logContext,
-    category: "database",
-  }, () => builder(ctx, request));
-
-  return attachDeferredWorkspaceShell(ctx, core, logContext);
+  return attachStreamingWorkspace(ctx, logContext, builder, request);
 }
 
 export function createIntelligenceWorkspaceLoader(
@@ -676,13 +702,6 @@ export function createFeatureGatedWorkspaceLoader(input: {
 
     const logContext = buildLoaderLogContext(request, ctx);
 
-    if (!isReactRouterDataRequest(request)) {
-      return {
-        ...workspaceShellOnly(ctx.currency),
-        featureGate: null,
-      };
-    }
-
     const { getStoreFeatureAvailability } = await import("../billing/feature-gates.server");
     const { toFeatureGateViewModel, serializeFeatureGateViewModel } = await import(
       "../billing/feature-gate-view"
@@ -703,10 +722,13 @@ export function createFeatureGatedWorkspaceLoader(input: {
       };
     }
 
-    const core = await timeLoaderSection("workspaceCore", { ...logContext, category: "database" }, () =>
-      input.builder(ctx, request),
-    );
+    if (isReactRouterDataRequest(request)) {
+      const core = await timeLoaderSection("workspaceCore", { ...logContext, category: "database" }, () =>
+        input.builder(ctx, request),
+      );
+      return { ...attachDeferredWorkspaceShell(ctx, core, logContext), featureGate };
+    }
 
-    return { ...attachDeferredWorkspaceShell(ctx, core, logContext), featureGate };
+    return { ...attachStreamingWorkspace(ctx, logContext, input.builder, request), featureGate };
   };
 }

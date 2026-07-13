@@ -22,7 +22,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ExperimentsWorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Experiments" />;
 }
 
 export function ErrorBoundary() {

@@ -14,7 +14,7 @@ export const loader = createFeatureGatedWorkspaceLoader({
 });
 
 export default function PredictionsWorkspaceRoute() {
-  return <IntelligenceWorkspaceRoute />;
+  return <IntelligenceWorkspaceRoute title="Predictions" />;
 }
 
 export function ErrorBoundary() {

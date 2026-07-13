@@ -37,18 +37,36 @@ function relatedLinksPanel() {
   return <CrossLinks links={defaultRelatedLinks()} />;
 }
 
-type ResolvedWorkspaceLoaderData = ReturnType<typeof normalizeWorkspaceLoaderData>;
+type ResolvedWorkspaceLoaderData = {
+  workspace: IntelligenceWorkspacePayload | null;
+  searchResults: import("../intelligence-ui/types").SearchResultView[];
+  timeline: import("../intelligence-ui/types").TimelineEventView[];
+  currency: string;
+  featureGate?: IntelligenceWorkspaceLoaderData["featureGate"];
+};
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof (value as Promise<unknown>).then === "function"
+  );
+}
 
 function normalizeWorkspaceLoaderData(
   data: IntelligenceWorkspaceLoaderData,
-): IntelligenceWorkspaceLoaderData & {
-  searchResults: import("../intelligence-ui/types").SearchResultView[];
-  timeline: import("../intelligence-ui/types").TimelineEventView[];
-} {
+): ResolvedWorkspaceLoaderData {
+  if (isPromiseLike(data.workspace)) {
+    throw new Error("workspace Promise must be resolved before renderIntelligenceWorkspace");
+  }
+
   return {
-    ...data,
+    workspace: data.workspace,
     searchResults: Array.isArray(data.searchResults) ? data.searchResults : [],
     timeline: Array.isArray(data.timeline) ? data.timeline : [],
+    currency: data.currency,
+    featureGate: data.featureGate,
   };
 }
 
